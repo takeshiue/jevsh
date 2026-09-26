@@ -2,10 +2,10 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 Takeshi Uematsu <takeshi.uematsu@gmail.com>
 #
-# jevsh - ask JEV how risky a shell command is before you run it.
+# jevsh - ask jev how risky a shell command is before you run it.
 # See the LICENSE file or `jevsh --help` for the license terms.
 
-JEVSH_VERSION="0.3.2"
+JEVSH_VERSION="0.3.4"
 JEVSH_DATE="2026-09-26"
 
 readonly JEVSH_API_URL="https://api.typesafe.ai/v1/systemone"
@@ -134,11 +134,11 @@ jevsh_version() {
 jevsh_help() {
     cat << EOF
 jevsh $JEVSH_VERSION (last updated $JEVSH_DATE)
-Ask JEV how risky a shell command is before you run it.
+Ask jev how risky a shell command is before you run it.
 
-jevsh sends the command line you give it to the JEV AI service (TypeSafe),
+jevsh sends the command line you give it to the jev AI service (TypeSafe),
 shows the risk level (LOW / MEDIUM / HIGH / CRITICAL) with its confidence,
-and runs the command only if you answer "y". JEV only advises; you decide.
+and runs the command only if you answer "y". jev only advises; you decide.
 
 Usage:
   jevsh [options] COMMAND [ARGS...]    assess, confirm, then run
@@ -153,14 +153,14 @@ Usage:
 Options:
   -c LINE               Assess LINE as one bash command line; run it with bash -c.
   --check               Assess only. Never asks, never runs. Prints one line:
-                          RISK CONFIDENCE LINE    (e.g. HIGH 0.60 rm -rf ./build)
+                          RISK CONFIDENCE LINE    (e.g. CRITICAL 0.87 ls -la > /etc/passwd)
   --fail-on LEVEL       With --check, exit 1 if the risk is LEVEL or higher.
                         LEVEL is LOW, MEDIUM, HIGH or CRITICAL.
   --yes                 Assess and show the result, then run without asking.
                         Does not run if the command could not be assessed.
                         Works without a terminal (the result goes to stderr).
   --no-jev              Run without assessment and without asking.
-  --set-key             Register or replace your JEV API key.
+  --set-key             Register or replace your jev API key.
   --init bash           Print the key-binding code for ~/.bashrc.
   --enable-keybinding   Add the key binding to ~/.bashrc (asks first, keeps a backup).
   --disable-keybinding  Remove the key binding from ~/.bashrc.
@@ -398,7 +398,7 @@ jevsh_register_key() {
 
 # First-run flow: explain what is sent, then register. Sets LOADED_API_KEY.
 jevsh_first_run() {
-    jevsh_tty 'jevsh needs a JEV API key to assess commands.\n\n'
+    jevsh_tty 'jevsh needs a jev API key to assess commands.\n\n'
     jevsh_print_data_notice
     jevsh_tty '\n'
     jevsh_ask_yes 'Register an API key now? [y/N]: ' || return 1
@@ -407,7 +407,7 @@ jevsh_first_run() {
 }
 
 # ---------------------------------------------------------------------------
-# JEV API
+# jev API
 
 jevsh_build_payload() {
     local line=$1 user_name
@@ -418,7 +418,7 @@ jevsh_build_payload() {
         "$(jevsh_json_string "$user_name")"
 }
 
-# Parses a JEV response into ASSESS_*. Only the exact known shape is accepted.
+# Parses a jev response into ASSESS_*. Only the exact known shape is accepted.
 jevsh_parse_response() {
     local response=$1 compact number probability probability_list shape label
     local -a probabilities=()
@@ -466,7 +466,7 @@ jevsh_assess() {
     http_code=${output##*$'\n'}
     body=${output%$'\n'*}
     if [[ $status -ne 0 || $http_code == 000 ]]; then
-        ASSESS_ERROR="cannot reach the JEV API."
+        ASSESS_ERROR="cannot reach the jev API."
         return 1
     fi
     case $http_code in
@@ -476,12 +476,12 @@ jevsh_assess() {
             return 1
             ;;
         *)
-            ASSESS_ERROR="the JEV API returned HTTP ${http_code//[^0-9]/}."
+            ASSESS_ERROR="the jev API returned HTTP ${http_code//[^0-9]/}."
             return 1
             ;;
     esac
     if ! jevsh_parse_response "$body"; then
-        ASSESS_ERROR="the JEV API response was not recognized."
+        ASSESS_ERROR="the jev API response was not recognized."
         return 1
     fi
 }
@@ -497,7 +497,7 @@ jevsh_show_assessment() {
         percentages+="  ${RISK_LEVELS[index]} $(jevsh_percent "${probabilities[index]}")"
     done
     jevsh_tty 'Command: %s\n' "$(jevsh_escape_display "$line")"
-    jevsh_tty 'JEV risk: %s (confidence %s)\n' "$ASSESS_RISK" "$(jevsh_percent "$ASSESS_CONFIDENCE")"
+    jevsh_tty 'jev risk: %s (confidence %s)\n' "$ASSESS_RISK" "$(jevsh_percent "$ASSESS_CONFIDENCE")"
     jevsh_tty '%s\n' "$percentages"
 }
 
@@ -535,7 +535,7 @@ jevsh_confirm() {
         jevsh_tty 'Run this command?\n  y      run it now\n  n      cancel (Enter also cancels)\n'
     else
         jevsh_tty 'Command: %s\n' "$(jevsh_escape_display "$line")"
-        jevsh_tty 'JEV assessment unavailable: %s\n' "$ASSESS_ERROR"
+        jevsh_tty 'jev assessment unavailable: %s\n' "$ASSESS_ERROR"
         jevsh_tty 'Run without AI assessment?\n  y      run it now without assessment\n  n      cancel (Enter also cancels)\n'
     fi
     if jevsh_ask_yes '[y/N]: '; then
@@ -566,7 +566,7 @@ jevsh_check() {
         load_status=0
     fi
     if [[ $load_status -ne 0 ]] || ! jevsh_assess "$LOADED_API_KEY" "$line"; then
-        jevsh_error "JEV assessment unavailable: $ASSESS_ERROR"
+        jevsh_error "jev assessment unavailable: $ASSESS_ERROR"
         exit "$EXIT_NO_ASSESSMENT"
     fi
     LC_ALL=C printf '%s %.2f %s\n' "$ASSESS_RISK" "$ASSESS_CONFIDENCE" "$(jevsh_escape_display "$line")"
@@ -604,7 +604,7 @@ jevsh_run_yes() {
         load_status=0
     fi
     if [[ $load_status -ne 0 ]] || ! jevsh_assess "$LOADED_API_KEY" "$line"; then
-        jevsh_error "JEV assessment unavailable: $ASSESS_ERROR Nothing was run."
+        jevsh_error "jev assessment unavailable: $ASSESS_ERROR Nothing was run."
         exit "$EXIT_NO_ASSESSMENT"
     fi
     jevsh_show_assessment "$line"

