@@ -6,8 +6,6 @@
 
 いつもどおりコマンドを打って、Enter の代わりに **Ctrl+Enter** を押すだけです。jev が危険度を判定し、`y` と答えればその行がそのまま実行されます。Enter だけを押したときは、今までとまったく同じです。
 
-root のシェルで:
-
 ```text
 # ls -la > /etc/passwd      <- Enter の代わりに Ctrl+Enter（または Ctrl+X Enter）
 Command: ls -la > /etc/passwd

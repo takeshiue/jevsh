@@ -2,6 +2,10 @@
 
 0.3.1 is the first public release. Versions before it were development steps and were not released on their own; only released versions get a tag.
 
+## 0.3.7 - 2026-09-26
+
+- README: remove the line before the first example.
+
 ## 0.3.6 - 2026-09-26
 
 - README: show the first example in a root shell again, without `sudo -i`.

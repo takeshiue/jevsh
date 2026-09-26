@@ -6,8 +6,6 @@ English | [日本語](README.ja.md)
 
 Type a command as usual and press **Ctrl+Enter** instead of Enter. jev tells you how risky the line is, and if you answer `y`, it runs right there. Enter alone works exactly as before.
 
-In a root shell:
-
 ```text
 # ls -la > /etc/passwd      <- press Ctrl+Enter (or Ctrl+X Enter) instead of Enter
 Command: ls -la > /etc/passwd
