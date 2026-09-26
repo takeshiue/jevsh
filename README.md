@@ -6,6 +6,8 @@ English | [日本語](README.ja.md)
 
 Type a command as usual and press **Ctrl+Enter** instead of Enter. jev tells you how risky the line is, and if you answer `y`, it runs right there. Enter alone works exactly as before.
 
+> **Tera Term users: press Ctrl+X, then Enter.** Tera Term (and some other terminals) sends the same code for Ctrl+Enter as for Enter, so Ctrl+Enter just runs the line. Ctrl+X Enter works in every terminal.
+
 ```text
 # ls -la > /etc/passwd      <- press Ctrl+Enter (or Ctrl+X Enter) instead of Enter
 Command: ls -la > /etc/passwd
@@ -115,7 +117,9 @@ jevsh --disable-keybinding    # removes only that block
 
 Then open a new terminal or run `source ~/.bashrc`.
 
-**Ctrl+Enter** also works if your terminal sends a distinct key sequence for it (`ESC [ 13 ; 5 u`). Many terminals send the same code as Enter, so Ctrl+X Enter is the default that works everywhere. **In Tera Term, use Ctrl+X Enter**; Ctrl+Enter sends the same code as Enter there. For example, in Windows Terminal add these entries to `actions` and `keybindings` in `settings.json`, keeping your existing entries:
+**Ctrl+Enter** also works if your terminal sends a distinct key sequence for it (`ESC [ 13 ; 5 u`). Many terminals send the same code as Enter, so Ctrl+X Enter is the default that works everywhere.
+
+**Tera Term:** use **Ctrl+X Enter**. In Tera Term, Ctrl+Enter sends the same code as Enter, so the line would simply run without assessment. For example, in Windows Terminal add these entries to `actions` and `keybindings` in `settings.json`, keeping your existing entries:
 
 ```json
 {"command":{"action":"sendInput","input":"\u001b[13;5u"},"id":"Jevsh.AssessLine"}

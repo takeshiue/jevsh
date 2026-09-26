@@ -2,6 +2,10 @@
 
 0.3.1 is the first public release. Versions before it were development steps and were not released on their own; only released versions get a tag.
 
+## 0.4.2 - 2026-09-26
+
+- README: tell Tera Term users near the top to press Ctrl+X Enter, because Ctrl+Enter there just runs the line.
+
 ## 0.4.1 - 2026-09-26
 
 - The API key is now shown while you paste it, so you can check it before it is verified and saved.

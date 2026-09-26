@@ -6,6 +6,8 @@
 
 いつもどおりコマンドを打って、Enter の代わりに **Ctrl+Enter** を押すだけです。jev が危険度を判定し、`y` と答えればその行がそのまま実行されます。Enter だけを押したときは、今までとまったく同じです。
 
+> **Tera Term をお使いの方は、Ctrl+X を押してから Enter を押してください。** Tera Term（とほかのいくつかの端末）は Ctrl+Enter を Enter と同じコードで送るため、Ctrl+Enter では判定されずにそのまま実行されます。Ctrl+X → Enter はどの端末でも使えます。
+
 ```text
 # ls -la > /etc/passwd      <- Enter の代わりに Ctrl+Enter（または Ctrl+X Enter）
 Command: ls -la > /etc/passwd
@@ -115,7 +117,9 @@ jevsh --disable-keybinding    # そのブロックだけを削除
 
 そのあと、新しい端末を開くか `source ~/.bashrc` を実行します。
 
-端末が Ctrl+Enter に専用のキー列（`ESC [ 13 ; 5 u`）を送る場合は、**Ctrl+Enter** も使えます。多くの端末は Enter と同じコードを送るため、どこでも使える Ctrl+X Enter を既定にしています。**Tera Term では Ctrl+X Enter を使ってください。** Tera Term の Ctrl+Enter は Enter と同じコードを送ります。たとえば Windows Terminal では、`settings.json` の `actions` と `keybindings` にそれぞれ次を追加します（既存の項目は残します）。
+端末が Ctrl+Enter に専用のキー列（`ESC [ 13 ; 5 u`）を送る場合は、**Ctrl+Enter** も使えます。多くの端末は Enter と同じコードを送るため、どこでも使える Ctrl+X Enter を既定にしています。
+
+**Tera Term:** **Ctrl+X → Enter** を使ってください。Tera Term の Ctrl+Enter は Enter と同じコードを送るため、判定されずにそのまま実行されてしまいます。たとえば Windows Terminal では、`settings.json` の `actions` と `keybindings` にそれぞれ次を追加します（既存の項目は残します）。
 
 ```json
 {"command":{"action":"sendInput","input":"\u001b[13;5u"},"id":"Jevsh.AssessLine"}

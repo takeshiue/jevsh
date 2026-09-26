@@ -18,7 +18,7 @@
 
 set -euo pipefail
 
-JEVSH_RELEASE="v0.4.1"
+JEVSH_RELEASE="v0.4.2"
 RELEASE_KEY_FINGERPRINT="SHA256:LIdW6JBHIV1YvPQHU+suSOe87ZJgNZGZlfjNdl1kkKg"
 SIGNER="takeshi.uematsu@gmail.com"
 
