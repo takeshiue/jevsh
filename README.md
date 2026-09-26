@@ -57,7 +57,7 @@ jevsh is a single file. You can download `jevsh` and `SHA256SUMS` from a tag, ch
 
 ## First run
 
-The first time you assess a command, jevsh explains what is sent and asks for your API key. The key is checked with the API before it is saved to `~/.config/jevsh/config` (mode 0600). The key is never shown on screen.
+The first time you assess a command, jevsh explains what is sent and asks for your API key. The key is shown as you paste it, so you can check it, and it is checked with the API before it is saved to `~/.config/jevsh/config` (mode 0600). Make sure nobody can see your screen while you paste it.
 
 You can also set the key with the `JEV_API_KEY` environment variable, or register or replace it at any time with `jevsh --set-key`.
 
@@ -189,7 +189,7 @@ When you assess a command, jevsh sends to TypeSafe (`https://api.typesafe.ai`):
 - the current directory
 - your user name and shell name
 
-Nothing else from your environment is collected. Nothing is sent when you press Enter alone. Your API key is sent only in the request header and is never shown or logged. See TypeSafe's terms for how they handle data.
+Nothing else from your environment is collected. Nothing is sent when you press Enter alone. Your API key is sent only in the request header and is never logged; it appears on screen only while you paste it. See TypeSafe's terms for how they handle data.
 
 ## Uninstall
 

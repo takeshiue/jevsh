@@ -491,11 +491,11 @@ t041() {
     unset JEV_API_KEY
     local out config=$HOME/.config/jevsh/config
     local newkey=NEWkey-0123456789
-    out=$(run_pty "'$JEVSH' --check ls" '[y/N]: =>y\n' "(input is hidden): =>$newkey\\n" '[Y/n]: =>n\n')
+    out=$(run_pty "'$JEVSH' --check ls" '[y/N]: =>y\n' "Paste your API key: =>$newkey\\n" '[Y/n]: =>n\n')
     check "OK shown" contains "$out" "Checking the key... OK"
     check "saved line" equals "$(cat "$config" 2> /dev/null)" "api_key=$newkey"
     check "mode 0600" equals "$(stat -c %a "$config" 2> /dev/null)" 600
-    check "key hidden" not_contains "$out" "$newkey"
+    check "key shown while typing" contains "$out" "Paste your API key: $newkey"
     check "check line sent" contains "$(cat "$MOCK_DIR/request")" '"command_line":"ls"'
     check "true sent first" equals "$(call_count)" 2
     end
@@ -506,7 +506,7 @@ t042() {
     unset JEV_API_KEY
     local out
     respond_raw '{"detail":"no"}' 401
-    out=$(run_pty "'$JEVSH' --set-key" '(input is hidden): =>bad-key-1\n' '[y/N]: =>n\n')
+    out=$(run_pty "'$JEVSH' --set-key" 'Paste your API key: =>bad-key-1\n' '[y/N]: =>n\n')
     check "failure shown" contains "$out" "failed: the API key was rejected (HTTP 401)"
     check "retry offered" contains "$out" "Try again? [y/N]"
     check "not saved" eval '[[ ! -e $HOME/.config/jevsh/config ]]'
@@ -521,7 +521,7 @@ t043() {
     printf 'api_key=OLDkey\n' > "$config"
     chmod 600 "$config"
     respond_raw '{"detail":"no"}' 401
-    run_pty "'$JEVSH' --set-key" '(input is hidden): =>another-key\n' '[y/N]: =>n\n' > /dev/null
+    run_pty "'$JEVSH' --set-key" 'Paste your API key: =>another-key\n' '[y/N]: =>n\n' > /dev/null
     check "old config kept" equals "$(cat "$config")" "api_key=OLDkey"
     check "no temp files" equals "$(find "${config%/*}" -name '.config.*' | wc -l)" 0
     end
@@ -756,7 +756,7 @@ t062() {
     unset JEV_API_KEY
     make_bashrc
     local out
-    out=$(run_pty "'$JEVSH' --set-key" '(input is hidden): =>KEYnew-1\n' '[Y/n]: =>n\n')
+    out=$(run_pty "'$JEVSH' --set-key" 'Paste your API key: =>KEYnew-1\n' '[Y/n]: =>n\n')
     check "offer shown" contains "$out" "Add the key binding to ~/.bashrc? [Y/n]"
     check "unchanged on n" cmp -s "$HOME/.bashrc" "$T/original"
     rm -f "$HOME/.bashrc"

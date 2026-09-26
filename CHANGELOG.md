@@ -2,6 +2,10 @@
 
 0.3.1 is the first public release. Versions before it were development steps and were not released on their own; only released versions get a tag.
 
+## 0.4.1 - 2026-09-26
+
+- The API key is now shown while you paste it, so you can check it before it is verified and saved.
+
 ## 0.4.0 - 2026-09-26
 
 - Fix: with Ctrl+Enter, answering `y` and pressing Enter did nothing on real terminals (Enter sends CR while Readline has CR-to-NL turned off). jevsh now accepts CR.
