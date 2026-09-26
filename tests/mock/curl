@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Mock curl for jevsh tests. Records the call and answers from files in MOCK_DIR.
+: "${MOCK_DIR:?MOCK_DIR must be set}"
+printf '%s\n' "$@" > "$MOCK_DIR/args"
+printf 'call\n' >> "$MOCK_DIR/calls"
+while (($#)); do
+    case $1 in
+        --config) cat -- "$2" > "$MOCK_DIR/config_used" ;;
+    esac
+    shift
+done
+cat > "$MOCK_DIR/request"
+exit_code=$(cat "$MOCK_DIR/curl_exit" 2> /dev/null || echo 0)
+if [[ $exit_code != 0 ]]; then
+    exit "$exit_code"
+fi
+http_code=$(cat "$MOCK_DIR/http_code" 2> /dev/null || echo 200)
+cat -- "$MOCK_DIR/response" 2> /dev/null
+printf '\n%s' "$http_code"

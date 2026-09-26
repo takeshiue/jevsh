@@ -1,0 +1,7 @@
+# Shell スクリプトは LF を保つ。Windows で CRLF に変換されるとサーバー上の bash が壊れ、
+# ローカルとサーバーの SHA-256 照合も成立しなくなる。
+*.sh text eol=lf
+*.bash text eol=lf
+# 拡張子のない実行ファイルも同じ理由で LF に固定する。
+jevsh text eol=lf
+tests/mock/curl text eol=lf

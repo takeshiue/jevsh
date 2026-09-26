@@ -1,0 +1,934 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Takeshi Uematsu <takeshi.uematsu@gmail.com>
+#
+# jevsh - ask JEV how risky a shell command is before you run it.
+# See the LICENSE file or `jevsh --help` for the license terms.
+
+JEVSH_VERSION="0.3.1"
+JEVSH_DATE="2026-09-26"
+
+readonly JEVSH_API_URL="https://api.typesafe.ai/v1/systemone"
+readonly JEVSH_TIMEOUT=15
+readonly JEVSH_MAX_RESPONSE=8192
+readonly JEVSH_BLOCK_BEGIN="# >>> jevsh >>>"
+readonly JEVSH_BLOCK_END="# <<< jevsh <<<"
+# Literal text written to ~/.bashrc; it must not expand here.
+# shellcheck disable=SC2016
+readonly JEVSH_BLOCK_BODY='command -v jevsh >/dev/null 2>&1 && eval "$(jevsh --init bash)"'
+
+readonly EXIT_FAIL_ON=1
+readonly EXIT_USAGE=2
+readonly EXIT_NO_ASSESSMENT=3
+readonly EXIT_CANCELED=4
+
+readonly -a RISK_LEVELS=(LOW MEDIUM HIGH CRITICAL)
+
+# Where assessments and questions are shown; stderr when there is no terminal.
+JEVSH_UI=/dev/tty
+
+# Results of the last assessment.
+ASSESS_RISK=
+ASSESS_CONFIDENCE=
+ASSESS_PROBABILITIES=
+ASSESS_ERROR=
+
+# Values passed between functions through globals, not command substitution:
+# a subshell would lose the INT trap that restores the terminal.
+LOADED_API_KEY=
+SAVED_CONFIG_PATH=
+JEVSH_ANSWER=
+
+# ---------------------------------------------------------------------------
+# Output helpers
+
+jevsh_error() {
+    printf 'jevsh: %s\n' "$*" >&2
+}
+
+jevsh_usage_error() {
+    jevsh_error "$*"
+    printf "Try 'jevsh --help' for more information.\n" >&2
+    exit "$EXIT_USAGE"
+}
+
+jevsh_has_tty() {
+    { : < /dev/tty; } 2> /dev/null
+}
+
+# Every caller passes a constant format string, like printf itself.
+# shellcheck disable=SC2059
+jevsh_tty() {
+    printf "$@" > "$JEVSH_UI"
+}
+
+# Escape control characters so an assessed line cannot drive the terminal.
+jevsh_escape_display() {
+    local LC_ALL=C input=$1 output='' character index code
+    for ((index = 0; index < ${#input}; index++)); do
+        character=${input:index:1}
+        if [[ $character == [[:cntrl:]] ]]; then
+            printf -v code '\\x%02x' "'$character"
+            output+=$code
+        else
+            output+=$character
+        fi
+    done
+    printf '%s' "$output"
+}
+
+jevsh_json_string() {
+    local LC_ALL=C input=$1 output='' character code index
+    for ((index = 0; index < ${#input}; index++)); do
+        character=${input:index:1}
+        # '\' below is a single backslash, not an escaped quote.
+        # shellcheck disable=SC1003
+        case $character in
+            '"') output+='\"' ;;
+            '\') output+='\\' ;;
+            $'\b') output+='\b' ;;
+            $'\f') output+='\f' ;;
+            $'\n') output+='\n' ;;
+            $'\r') output+='\r' ;;
+            $'\t') output+='\t' ;;
+            *)
+                if [[ $character == [[:cntrl:]] ]]; then
+                    printf -v code '%04x' "'$character"
+                    output+="\\u$code"
+                else
+                    output+=$character
+                fi
+                ;;
+        esac
+    done
+    printf '"%s"' "$output"
+}
+
+# Bash has no floating point, so convert "0.7" style decimals by string handling.
+jevsh_percent() {
+    local value=$1 whole fraction=
+    whole=${value%%.*}
+    [[ $value == *.* ]] && fraction=${value#*.}
+    fraction=${fraction}00
+    printf '%d%%' "$((10#$whole * 100 + 10#${fraction:0:2}))"
+}
+
+jevsh_risk_rank() {
+    local index
+    for index in "${!RISK_LEVELS[@]}"; do
+        if [[ ${RISK_LEVELS[index]} == "$1" ]]; then
+            printf '%d' "$index"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# ---------------------------------------------------------------------------
+# Help and version
+
+jevsh_version() {
+    printf 'jevsh %s (%s)\n' "$JEVSH_VERSION" "$JEVSH_DATE"
+}
+
+jevsh_help() {
+    cat << EOF
+jevsh $JEVSH_VERSION (last updated $JEVSH_DATE)
+Ask JEV how risky a shell command is before you run it.
+
+jevsh sends the command line you give it to the JEV AI service (TypeSafe),
+shows the risk level (LOW / MEDIUM / HIGH / CRITICAL) with its confidence,
+and runs the command only if you answer "y". JEV only advises; you decide.
+
+Usage:
+  jevsh [options] COMMAND [ARGS...]    assess, confirm, then run
+  jevsh [options] -c 'COMMAND LINE'    same, for a full line (pipes etc.)
+  jevsh --check [--fail-on LEVEL] COMMAND [ARGS...]
+  jevsh --check [--fail-on LEVEL] -c 'COMMAND LINE'
+  jevsh --set-key
+  jevsh --init bash
+  jevsh --enable-keybinding | --disable-keybinding
+  jevsh --help | --version
+
+Options:
+  -c LINE               Assess LINE as one bash command line; run it with bash -c.
+  --check               Assess only. Never asks, never runs. Prints one line:
+                          RISK CONFIDENCE LINE    (e.g. HIGH 0.60 rm -rf ./build)
+  --fail-on LEVEL       With --check, exit 1 if the risk is LEVEL or higher.
+                        LEVEL is LOW, MEDIUM, HIGH or CRITICAL.
+  --yes                 Assess and show the result, then run without asking.
+                        Does not run if the command could not be assessed.
+                        Works without a terminal (the result goes to stderr).
+  --no-jev              Run without assessment and without asking.
+  --set-key             Register or replace your JEV API key.
+  --init bash           Print the key-binding code for ~/.bashrc.
+  --enable-keybinding   Add the key binding to ~/.bashrc (asks first, keeps a backup).
+  --disable-keybinding  Remove the key binding from ~/.bashrc.
+  --help                Show this help.
+  --version             Show the version.
+  --                    End of options; everything after it is the command.
+
+When asked "Run this command? [y/N]", only "y" or "Y" runs it. Anything
+else, including Enter alone, cancels.
+
+To skip the question for low risks, export JEVSH_AUTO_RUN in ~/.bashrc:
+  export JEVSH_AUTO_RUN=LOW    run without asking when the risk is LOW
+With MEDIUM, both LOW and MEDIUM run without asking. The assessment is still
+shown. jevsh always asks when it could not assess the command.
+
+Pipes and redirections:
+  Your shell handles |, >, >>, <, &&, || and ; before jevsh runs, so jevsh
+  would only see the part before them. Use -c with single quotes to assess
+  the whole line:
+    jevsh -c 'cat data.csv | sort > out.txt'    assesses the full line
+    jevsh cat data.csv | sort > out.txt         assesses only "cat data.csv"
+  With the key binding you do not need quotes: the whole line is assessed.
+
+Key binding:
+  After 'jevsh --enable-keybinding', type a command as usual and press
+  Ctrl+X Enter (or Ctrl+Enter, if your terminal sends a distinct key for it)
+  instead of Enter. Enter alone still runs commands without assessment.
+  To use another key, set JEVSH_KEY in ~/.bashrc before the jevsh block,
+  for example: JEVSH_KEY='\C-x\C-a'
+
+Shell scripts:
+  The key binding works only at your interactive bash prompt. Lines in a
+  shell script run as usual, without assessment.
+  "jevsh COMMAND" inside a script asks on your terminal each time when the
+  script runs from a terminal. Without a terminal (cron, CI, nohup) jevsh
+  cannot ask, so it does not run the command and exits with status 4.
+  For automation, use --check with --fail-on and decide in the script:
+    jevsh --check --fail-on HIGH -c "$line" || exit 1
+
+What is sent:
+  The command line you assess (exactly as typed, including any passwords or
+  tokens in it), the current directory, your user name and shell, to TypeSafe
+  (https://api.typesafe.ai). Nothing else from your environment is collected.
+
+Environment and files:
+  JEV_API_KEY           API key; used instead of the config file if set.
+  JEVSH_KEY             Readline key sequence for the key binding.
+  JEVSH_AUTO_RUN        LOW, MEDIUM, HIGH or CRITICAL: run without asking when
+                        the risk is at or below this level.
+  \${XDG_CONFIG_HOME:-~/.config}/jevsh/config
+                        Saved API key ("api_key=..."), mode 0600.
+
+Exit status:
+  COMMAND / -c: the command's own status if it ran; 2 usage error;
+                3 no API key; 4 canceled or no terminal to ask on.
+  --check:      0 assessed; 1 risk at or above --fail-on; 2 usage error;
+                3 could not assess.
+  Other options: 0 success; 1 failure; 2 usage error.
+
+License:
+  MIT License. You are free to use, modify, and redistribute jevsh, including
+  for commercial use, as long as you keep the copyright and license notice.
+  Provided "as is", without warranty of any kind.
+
+Author:
+  Takeshi Uematsu <takeshi.uematsu@gmail.com>
+EOF
+}
+
+# ---------------------------------------------------------------------------
+# Terminal questions
+
+JEVSH_SAVED_TTY=
+
+jevsh_restore_tty() {
+    if [[ -n $JEVSH_SAVED_TTY ]]; then
+        stty "$JEVSH_SAVED_TTY" < /dev/tty 2> /dev/null
+        JEVSH_SAVED_TTY=
+    fi
+}
+
+jevsh_on_interrupt() {
+    jevsh_restore_tty
+    printf '\nCanceled.\n' > /dev/tty 2> /dev/null
+    exit "$EXIT_CANCELED"
+}
+
+# Reads one answer from the terminal with echo on, even when called from a
+# Readline key binding (which leaves the terminal in no-echo raw mode).
+# Usage: jevsh_read_answer [hidden]; the answer is left in JEVSH_ANSWER.
+jevsh_read_answer() {
+    local hidden=${1:-} status
+    JEVSH_ANSWER=
+    JEVSH_SAVED_TTY=$(stty -g < /dev/tty 2> /dev/null)
+    if [[ -n $hidden ]]; then
+        stty -echo icanon < /dev/tty 2> /dev/null
+    else
+        stty echo icanon < /dev/tty 2> /dev/null
+    fi
+    IFS= read -r JEVSH_ANSWER < /dev/tty
+    status=$?
+    jevsh_restore_tty
+    [[ -n $hidden ]] && printf '\n' > /dev/tty
+    return "$status"
+}
+
+# Returns 0 only for an explicit y/Y answer.
+jevsh_ask_yes() {
+    jevsh_tty '%s' "$1"
+    jevsh_read_answer || return 1
+    [[ $JEVSH_ANSWER == [yY] ]]
+}
+
+# ---------------------------------------------------------------------------
+# Configuration and API key
+
+jevsh_config_path() {
+    local base=${XDG_CONFIG_HOME:-}
+    # The XDG spec says relative paths must be ignored.
+    [[ $base == /* ]] || base=$HOME/.config
+    printf '%s/jevsh/config' "$base"
+}
+
+jevsh_valid_key_format() {
+    local key=$1
+    [[ ${#key} -ge 1 && ${#key} -le 4096 && $key =~ ^[A-Za-z0-9._-]+$ ]]
+}
+
+# Sets LOADED_API_KEY. Returns 0 on success, 1 if no key exists, 2 if a key
+# source exists but is unusable (the reason is left in ASSESS_ERROR).
+jevsh_load_key() {
+    local config_path mode owner size key
+    local -a lines
+    LOADED_API_KEY=
+    if [[ -n ${JEV_API_KEY:-} ]]; then
+        if ! jevsh_valid_key_format "$JEV_API_KEY"; then
+            ASSESS_ERROR="JEV_API_KEY has an unsupported format."
+            return 2
+        fi
+        LOADED_API_KEY=$JEV_API_KEY
+        return 0
+    fi
+    if [[ -z ${HOME:-} ]]; then
+        ASSESS_ERROR="HOME is not set."
+        return 2
+    fi
+    config_path=$(jevsh_config_path)
+    if [[ -L $config_path ]]; then
+        ASSESS_ERROR="$config_path must not be a symbolic link."
+        return 2
+    fi
+    [[ -e $config_path ]] || return 1
+    if [[ ! -f $config_path ]] || ! read -r mode owner size < <(stat -c '%a %u %s' -- "$config_path" 2> /dev/null); then
+        ASSESS_ERROR="cannot inspect $config_path."
+        return 2
+    fi
+    if [[ $mode != 600 || $owner != "$(id -u)" || $size -gt 4200 ]]; then
+        ASSESS_ERROR="$config_path must be owned by you, mode 0600, and small."
+        return 2
+    fi
+    mapfile -t lines < "$config_path"
+    if [[ ${#lines[@]} -ne 1 || ${lines[0]} != api_key=* ]]; then
+        ASSESS_ERROR="$config_path must contain exactly one api_key= line."
+        return 2
+    fi
+    key=${lines[0]#api_key=}
+    if ! jevsh_valid_key_format "$key"; then
+        ASSESS_ERROR="the saved API key has an unsupported format."
+        return 2
+    fi
+    LOADED_API_KEY=$key
+}
+
+# Sets SAVED_CONFIG_PATH on success.
+jevsh_save_key() {
+    local key=$1 config_path directory temporary
+    SAVED_CONFIG_PATH=
+    config_path=$(jevsh_config_path)
+    directory=${config_path%/*}
+    if [[ -L $config_path ]]; then
+        jevsh_error "$config_path is a symbolic link; not writing to it."
+        return 1
+    fi
+    (umask 077 && mkdir -p -- "$directory") || return 1
+    temporary=$(umask 077 && mktemp -- "$directory/.config.XXXXXX") || return 1
+    # Write via a temporary file and rename so a failure never leaves a broken config.
+    if ! { printf 'api_key=%s\n' "$key" > "$temporary" && chmod 600 -- "$temporary" && mv -f -- "$temporary" "$config_path"; }; then
+        rm -f -- "$temporary"
+        jevsh_error "could not save $config_path."
+        return 1
+    fi
+    SAVED_CONFIG_PATH=$config_path
+}
+
+jevsh_display_config_path() {
+    local path=$1
+    # Shown to the user, so the tilde is meant literally.
+    # shellcheck disable=SC2088
+    [[ $path == "$HOME"/* ]] && path="~/${path#"$HOME"/}"
+    printf '%s' "$path"
+}
+
+jevsh_print_data_notice() {
+    jevsh_tty '%s\n' \
+        "What is sent: each command line you assess (exactly as typed, including any" \
+        "passwords or tokens in it), the current directory, your user name and shell," \
+        "to TypeSafe (https://api.typesafe.ai). Nothing else from your environment is" \
+        "collected. See TypeSafe's terms for how they handle data."
+}
+
+# Asks for a key, checks it with the API, and saves it. Sets LOADED_API_KEY.
+jevsh_register_key() {
+    local key
+    while true; do
+        jevsh_tty 'Paste your API key (input is hidden): '
+        jevsh_read_answer hidden || return 1
+        key=$JEVSH_ANSWER
+        JEVSH_ANSWER=
+        if ! jevsh_valid_key_format "$key"; then
+            jevsh_tty 'That does not look like an API key (letters, digits, ".", "_", "-" only).\n'
+        else
+            jevsh_tty 'Checking the key... '
+            if jevsh_assess "$key" "true"; then
+                jevsh_tty 'OK\n'
+                jevsh_save_key "$key" || return 1
+                jevsh_tty 'Saved to %s (mode 0600).\n' "$(jevsh_display_config_path "$SAVED_CONFIG_PATH")"
+                LOADED_API_KEY=$key
+                return 0
+            fi
+            jevsh_tty 'failed: %s\n' "$ASSESS_ERROR"
+        fi
+        jevsh_ask_yes 'Try again? [y/N]: ' || return 1
+    done
+}
+
+# First-run flow: explain what is sent, then register. Sets LOADED_API_KEY.
+jevsh_first_run() {
+    jevsh_tty 'jevsh needs a JEV API key to assess commands.\n\n'
+    jevsh_print_data_notice
+    jevsh_tty '\n'
+    jevsh_ask_yes 'Register an API key now? [y/N]: ' || return 1
+    jevsh_register_key || return 1
+    jevsh_offer_keybinding
+}
+
+# ---------------------------------------------------------------------------
+# JEV API
+
+jevsh_build_payload() {
+    local line=$1 user_name
+    user_name=$(id -un 2> /dev/null) || user_name=unknown
+    printf '{"model":"jev-latest","state":{"command_line":%s,"working_directory":%s,"user":%s,"shell":"bash"},"questions":{"risk":{"type":"choice","instructions":"Assess the risk of running this exact Linux Bash input line, considering its arguments, paths, user, and shell.","criteria":{"LOW":"Read-only or minor effect","MEDIUM":"Limited changes or moderate risk","HIGH":"Deletion, overwrite, or broad changes","CRITICAL":"Severe system-wide or irreversible impact"}}}}' \
+        "$(jevsh_json_string "$line")" \
+        "$(jevsh_json_string "$PWD")" \
+        "$(jevsh_json_string "$user_name")"
+}
+
+# Parses a JEV response into ASSESS_*. Only the exact known shape is accepted.
+jevsh_parse_response() {
+    local response=$1 compact number probability probability_list shape label
+    local -a probabilities=()
+    # '\' is a single backslash; responses containing escapes are rejected.
+    # shellcheck disable=SC1003
+    if [[ ${#response} -gt $JEVSH_MAX_RESPONSE || $response == *'\'* ]]; then
+        return 1
+    fi
+    compact=${response//[[:space:]]/}
+    number='[0-9]+(\.[0-9]+)?'
+    probability='"(LOW|MEDIUM|HIGH|CRITICAL)":'"$number"
+    probability_list="($probability,){3}$probability"
+    shape='^\{"model":"jev-[A-Za-z0-9._-]+","answers":\{"risk":\{"type":"choice","choice":"(LOW|MEDIUM|HIGH|CRITICAL)","confidence":('"$number"'),"probabilities":\{('"$probability_list"')\}\}\},"usage":\{"input_tokens":[0-9]+,"output_tokens":[0-9]+\}\}$'
+    [[ $compact =~ $shape ]] || return 1
+    ASSESS_RISK=${BASH_REMATCH[1]}
+    ASSESS_CONFIDENCE=${BASH_REMATCH[2]}
+    local probability_text=${BASH_REMATCH[4]}
+    # Four entries with all four labels present also rules out duplicates.
+    for label in "${RISK_LEVELS[@]}"; do
+        [[ $probability_text =~ \"$label\":($number) ]] || return 1
+        probabilities+=("${BASH_REMATCH[1]}")
+    done
+    ASSESS_PROBABILITIES="${probabilities[*]}"
+}
+
+# Usage: jevsh_assess KEY LINE. Sets ASSESS_* and returns 0, or sets
+# ASSESS_ERROR and returns 1.
+jevsh_assess() {
+    local key=$1 line=$2 payload output status http_code body
+    ASSESS_RISK='' ASSESS_CONFIDENCE='' ASSESS_PROBABILITIES='' ASSESS_ERROR=''
+    if ! command -v curl > /dev/null 2>&1; then
+        ASSESS_ERROR="curl is not installed."
+        return 1
+    fi
+    payload=$(jevsh_build_payload "$line")
+    # The key goes through a file descriptor, never the curl command line.
+    output=$(curl --silent --show-error --max-time "$JEVSH_TIMEOUT" \
+        --max-filesize 65536 \
+        --config <(printf 'header = "Authorization: Bearer %s"\n' "$key") \
+        --header 'Content-Type: application/json' \
+        --data-binary @- \
+        --write-out '\n%{http_code}' \
+        "$JEVSH_API_URL" <<< "$payload" 2> /dev/null)
+    status=$?
+    http_code=${output##*$'\n'}
+    body=${output%$'\n'*}
+    if [[ $status -ne 0 || $http_code == 000 ]]; then
+        ASSESS_ERROR="cannot reach the JEV API."
+        return 1
+    fi
+    case $http_code in
+        2??) ;;
+        401 | 403)
+            ASSESS_ERROR="the API key was rejected (HTTP $http_code)."
+            return 1
+            ;;
+        *)
+            ASSESS_ERROR="the JEV API returned HTTP ${http_code//[^0-9]/}."
+            return 1
+            ;;
+    esac
+    if ! jevsh_parse_response "$body"; then
+        ASSESS_ERROR="the JEV API response was not recognized."
+        return 1
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# Showing results and confirming
+
+jevsh_show_assessment() {
+    local line=$1 index percentages=
+    local -a probabilities
+    read -r -a probabilities <<< "$ASSESS_PROBABILITIES"
+    for index in "${!RISK_LEVELS[@]}"; do
+        percentages+="  ${RISK_LEVELS[index]} $(jevsh_percent "${probabilities[index]}")"
+    done
+    jevsh_tty 'Command: %s\n' "$(jevsh_escape_display "$line")"
+    jevsh_tty 'JEV risk: %s (confidence %s)\n' "$ASSESS_RISK" "$(jevsh_percent "$ASSESS_CONFIDENCE")"
+    jevsh_tty '%s\n' "$percentages"
+}
+
+# True if JEVSH_AUTO_RUN allows running the last assessed risk without asking.
+# Only called after a successful assessment, never when assessment failed.
+jevsh_auto_run_allowed() {
+    local limit=${JEVSH_AUTO_RUN:-} limit_rank
+    [[ -n $limit ]] || return 1
+    if ! limit_rank=$(jevsh_risk_rank "$limit"); then
+        jevsh_tty 'JEVSH_AUTO_RUN must be LOW, MEDIUM, HIGH or CRITICAL; asking instead.\n'
+        return 1
+    fi
+    (($(jevsh_risk_rank "$ASSESS_RISK") <= limit_rank))
+}
+
+# Returns 0 if the user approves running LINE. $2 is the extra text for cancel.
+jevsh_confirm() {
+    local line=$1 cancel_note=${2:-} load_status
+    jevsh_load_key
+    load_status=$?
+    if [[ $load_status -eq 1 ]]; then
+        if ! jevsh_first_run; then
+            jevsh_tty 'No API key registered. Nothing was run.\n'
+            return "$EXIT_NO_ASSESSMENT"
+        fi
+        load_status=0
+    fi
+
+    if [[ $load_status -eq 0 ]] && jevsh_assess "$LOADED_API_KEY" "$line"; then
+        jevsh_show_assessment "$line"
+        if jevsh_auto_run_allowed; then
+            jevsh_tty 'Running without asking (risk %s is at or below JEVSH_AUTO_RUN=%s).\n' "$ASSESS_RISK" "$JEVSH_AUTO_RUN"
+            return 0
+        fi
+        jevsh_tty 'Run this command?\n  y      run it now\n  n      cancel (Enter also cancels)\n'
+    else
+        jevsh_tty 'Command: %s\n' "$(jevsh_escape_display "$line")"
+        jevsh_tty 'JEV assessment unavailable: %s\n' "$ASSESS_ERROR"
+        jevsh_tty 'Run without AI assessment?\n  y      run it now without assessment\n  n      cancel (Enter also cancels)\n'
+    fi
+    if jevsh_ask_yes '[y/N]: '; then
+        return 0
+    fi
+    jevsh_tty 'Canceled.%s\n' "$cancel_note"
+    return "$EXIT_CANCELED"
+}
+
+# ---------------------------------------------------------------------------
+# Modes
+
+jevsh_check() {
+    local line=$1 fail_on=$2 load_status
+    jevsh_load_key
+    load_status=$?
+    if [[ $load_status -eq 1 ]]; then
+        if ! jevsh_has_tty; then
+            jevsh_error "no API key. Run 'jevsh --set-key' first."
+            exit "$EXIT_NO_ASSESSMENT"
+        fi
+        trap jevsh_on_interrupt INT
+        if ! jevsh_first_run; then
+            jevsh_error "no API key. Run 'jevsh --set-key' first."
+            exit "$EXIT_NO_ASSESSMENT"
+        fi
+        trap - INT
+        load_status=0
+    fi
+    if [[ $load_status -ne 0 ]] || ! jevsh_assess "$LOADED_API_KEY" "$line"; then
+        jevsh_error "JEV assessment unavailable: $ASSESS_ERROR"
+        exit "$EXIT_NO_ASSESSMENT"
+    fi
+    LC_ALL=C printf '%s %.2f %s\n' "$ASSESS_RISK" "$ASSESS_CONFIDENCE" "$(jevsh_escape_display "$line")"
+    if [[ -n $fail_on ]] && (($(jevsh_risk_rank "$ASSESS_RISK") >= $(jevsh_risk_rank "$fail_on"))); then
+        exit "$EXIT_FAIL_ON"
+    fi
+    exit 0
+}
+
+jevsh_exec() {
+    local shell_line=$1
+    shift
+    if [[ -n $shell_line ]]; then
+        exec "${BASH:-bash}" -c -- "$shell_line"
+    fi
+    # Run the arguments as given, without re-parsing them through eval.
+    exec -- "$@"
+}
+
+# --yes: assess and show the result, then run without asking.
+jevsh_run_yes() {
+    local line=$1 shell_line=$2 load_status
+    shift 2
+    jevsh_has_tty || JEVSH_UI=/dev/stderr
+    jevsh_load_key
+    load_status=$?
+    if [[ $load_status -eq 1 ]]; then
+        if [[ $JEVSH_UI != /dev/tty ]]; then
+            jevsh_error "no API key. Run 'jevsh --set-key' first."
+            exit "$EXIT_NO_ASSESSMENT"
+        fi
+        trap jevsh_on_interrupt INT
+        jevsh_first_run || exit "$EXIT_NO_ASSESSMENT"
+        trap - INT
+        load_status=0
+    fi
+    if [[ $load_status -ne 0 ]] || ! jevsh_assess "$LOADED_API_KEY" "$line"; then
+        jevsh_error "JEV assessment unavailable: $ASSESS_ERROR Nothing was run."
+        exit "$EXIT_NO_ASSESSMENT"
+    fi
+    jevsh_show_assessment "$line"
+    jevsh_tty 'Running without asking (--yes).\n'
+    jevsh_exec "$shell_line" "$@"
+}
+
+jevsh_run() {
+    local shell_line=$1 mode=$2 status
+    shift 2
+    local line
+    if [[ -n $shell_line ]]; then
+        line=$shell_line
+    else
+        printf -v line '%q ' "$@"
+        line=${line% }
+    fi
+    case $mode in
+        no-jev) jevsh_exec "$shell_line" "$@" ;;
+        yes) jevsh_run_yes "$line" "$shell_line" "$@" ;;
+    esac
+    if ! jevsh_has_tty; then
+        jevsh_error "no terminal to confirm on; nothing was run. Use --check to assess only."
+        exit "$EXIT_CANCELED"
+    fi
+    trap jevsh_on_interrupt INT
+    jevsh_confirm "$line"
+    status=$?
+    trap - INT
+    ((status == 0)) || exit "$status"
+    jevsh_exec "$shell_line" "$@"
+}
+
+# Used by the key binding: confirm only; the shell runs the line itself.
+jevsh_binding() {
+    local line=$1 status
+    trap jevsh_on_interrupt INT
+    jevsh_tty '\n'
+    jevsh_confirm "$line" ' The line stays at the prompt for editing.'
+    status=$?
+    trap - INT
+    exit "$status"
+}
+
+jevsh_set_key() {
+    if ! jevsh_has_tty; then
+        jevsh_error "--set-key needs a terminal."
+        exit 1
+    fi
+    jevsh_print_data_notice
+    jevsh_tty '\n'
+    trap jevsh_on_interrupt INT
+    if ! jevsh_register_key; then
+        jevsh_tty 'No key was saved.\n'
+        exit 1
+    fi
+    jevsh_offer_keybinding
+    exit 0
+}
+
+# ---------------------------------------------------------------------------
+# Key binding
+
+jevsh_self_path() {
+    local source=${BASH_SOURCE[0]} directory
+    if [[ $source != */* ]]; then
+        source=$(command -v -- "$source") || source=${BASH_SOURCE[0]}
+    fi
+    directory=$(cd -- "${source%/*}" 2> /dev/null && pwd -P) || {
+        printf '%s' "$source"
+        return
+    }
+    printf '%s/%s' "$directory" "${source##*/}"
+}
+
+jevsh_init() {
+    local shell=$1 self keys key
+    [[ $shell == bash ]] || jevsh_usage_error "--init supports only 'bash'."
+    self=$(jevsh_self_path)
+    keys=('\e[13;5u' '\C-x\C-m')
+    if [[ -n ${JEVSH_KEY:-} ]]; then
+        if [[ $JEVSH_KEY == *[\"\'$'\n']* ]]; then
+            jevsh_error "JEVSH_KEY must not contain quotes or newlines; using the default keys."
+        else
+            keys=("$JEVSH_KEY")
+        fi
+    fi
+    printf '__jevsh_self=%q\n' "$self"
+    cat << 'EOF'
+__jevsh_assess_line() {
+    local __jevsh_line=$READLINE_LINE
+    [[ -n $__jevsh_line ]] || return 0
+    if "$__jevsh_self" --binding -c "$__jevsh_line" < /dev/tty; then
+        READLINE_LINE=
+        READLINE_POINT=0
+        history -s -- "$__jevsh_line"
+        builtin eval -- "$__jevsh_line"
+    fi
+}
+EOF
+    for key in "${keys[@]}"; do
+        printf "bind -x '\"%s\":__jevsh_assess_line'\n" "$key"
+    done
+}
+
+jevsh_bashrc_has_block() {
+    [[ -f $1 ]] && grep -qxF -- "$JEVSH_BLOCK_BEGIN" "$1"
+}
+
+jevsh_print_block() {
+    printf '%s\n%s\n%s\n' "$JEVSH_BLOCK_BEGIN" "$JEVSH_BLOCK_BODY" "$JEVSH_BLOCK_END"
+}
+
+# Replaces TARGET with the stdin content via a temporary file in the same directory.
+jevsh_replace_file() {
+    local target=$1 temporary
+    temporary=$(mktemp -- "${target%/*}/.bashrc.jevsh.XXXXXX") || return 1
+    if ! cat > "$temporary"; then
+        rm -f -- "$temporary"
+        return 1
+    fi
+    if [[ -e $target ]]; then
+        chmod --reference="$target" -- "$temporary" 2> /dev/null
+    fi
+    mv -f -- "$temporary" "$target" || {
+        rm -f -- "$temporary"
+        return 1
+    }
+}
+
+jevsh_backup_bashrc() {
+    local bashrc=$1 backup
+    [[ -e $bashrc ]] || return 0
+    backup="$bashrc.jevsh-backup-$(date +%Y%m%d%H%M%S)"
+    cp -p -- "$bashrc" "$backup" || return 1
+    printf 'Backup saved to %s\n' "$backup"
+}
+
+# Returns 0 if the block was added or already present.
+jevsh_add_block() {
+    local bashrc=$HOME/.bashrc
+    if [[ -L $bashrc ]]; then
+        printf '%s is a symbolic link, so jevsh did not change it.\n' "$bashrc"
+        printf 'Add these lines yourself:\n\n'
+        jevsh_print_block
+        return 1
+    fi
+    if jevsh_bashrc_has_block "$bashrc"; then
+        printf 'The key binding is already in %s.\n' "$bashrc"
+        return 0
+    fi
+    jevsh_backup_bashrc "$bashrc" || {
+        jevsh_error "could not back up $bashrc; nothing changed."
+        return 1
+    }
+    {
+        if [[ -s $bashrc ]]; then
+            cat -- "$bashrc"
+            # Keep the block on its own lines even if the file lacks a final newline.
+            [[ $(tail -c 1 -- "$bashrc") == '' ]] || printf '\n'
+        fi
+        jevsh_print_block
+    } | jevsh_replace_file "$bashrc" || {
+        jevsh_error "could not update $bashrc; nothing changed."
+        return 1
+    }
+    printf 'Added. Open a new terminal or run: source ~/.bashrc\n'
+}
+
+jevsh_keybinding_notice() {
+    cat << EOF
+Key binding (optional)
+  With the key binding, you can assess any command line without typing
+  "jevsh": type the command as usual, then press Ctrl+X Enter (or
+  Ctrl+Enter if your terminal is set up for it) instead of Enter.
+  Pressing Enter alone still runs the command normally, without assessment.
+
+  This adds the following block to ~/.bashrc (a backup is saved first):
+
+EOF
+    jevsh_print_block | sed 's/^/    /'
+    printf '\n  You can remove it later with: jevsh --disable-keybinding\n\n'
+}
+
+# Offered right after a key is registered; skipped if already enabled.
+jevsh_offer_keybinding() {
+    jevsh_bashrc_has_block "$HOME/.bashrc" && return 0
+    jevsh_tty '\n'
+    jevsh_keybinding_notice > /dev/tty
+    if jevsh_ask_yes 'Add the key binding to ~/.bashrc? [y/N]: '; then
+        jevsh_add_block > /dev/tty
+    else
+        jevsh_tty 'Skipped. You can add it later with: jevsh --enable-keybinding\n'
+    fi
+    jevsh_tty '\n'
+}
+
+jevsh_enable_keybinding() {
+    if jevsh_bashrc_has_block "$HOME/.bashrc"; then
+        printf 'The key binding is already in %s.\n' "$HOME/.bashrc"
+        exit 0
+    fi
+    if ! jevsh_has_tty; then
+        jevsh_error "--enable-keybinding needs a terminal to ask for confirmation."
+        exit 1
+    fi
+    jevsh_keybinding_notice > /dev/tty
+    trap jevsh_on_interrupt INT
+    if ! jevsh_ask_yes 'Add the key binding to ~/.bashrc? [y/N]: '; then
+        jevsh_tty 'Nothing changed.\n'
+        exit 1
+    fi
+    trap - INT
+    jevsh_add_block > /dev/tty || exit 1
+    exit 0
+}
+
+jevsh_disable_keybinding() {
+    local bashrc=$HOME/.bashrc
+    if ! jevsh_bashrc_has_block "$bashrc"; then
+        printf 'No jevsh key binding found in %s.\n' "$bashrc"
+        exit 0
+    fi
+    if [[ -L $bashrc ]]; then
+        jevsh_error "$bashrc is a symbolic link; remove the jevsh block yourself."
+        exit 1
+    fi
+    jevsh_backup_bashrc "$bashrc" || {
+        jevsh_error "could not back up $bashrc; nothing changed."
+        exit 1
+    }
+    awk -v begin="$JEVSH_BLOCK_BEGIN" -v end="$JEVSH_BLOCK_END" '
+        $0 == begin { skipping = 1; next }
+        skipping && $0 == end { skipping = 0; next }
+        !skipping { print }
+    ' "$bashrc" | jevsh_replace_file "$bashrc" || {
+        jevsh_error "could not update $bashrc; nothing changed."
+        exit 1
+    }
+    printf 'Removed. Open a new terminal to finish.\n'
+    exit 0
+}
+
+# ---------------------------------------------------------------------------
+# Main
+
+jevsh_main() {
+    local check='' fail_on='' shell_line='' has_shell_line='' action='' init_shell='' binding='' mode=''
+    while (($#)); do
+        case $1 in
+            --help) jevsh_help; exit 0 ;;
+            --version) jevsh_version; exit 0 ;;
+            --check) check=1 ;;
+            --fail-on)
+                (($# >= 2)) || jevsh_usage_error "--fail-on needs a level."
+                fail_on=$2
+                shift
+                ;;
+            --fail-on=*) fail_on=${1#--fail-on=} ;;
+            -c)
+                (($# >= 2)) || jevsh_usage_error "-c needs a command line."
+                shell_line=$2
+                has_shell_line=1
+                shift
+                ;;
+            --set-key | --enable-keybinding | --disable-keybinding) action=$1 ;;
+            --yes) [[ $mode == no-jev ]] || mode=yes ;;
+            --no-jev) mode=no-jev ;;
+            --init)
+                (($# >= 2)) || jevsh_usage_error "--init needs a shell name."
+                action=--init
+                init_shell=$2
+                shift
+                ;;
+            --binding) binding=1 ;;
+            --) shift; break ;;
+            -*) jevsh_usage_error "unknown option: $1" ;;
+            *) break ;;
+        esac
+        shift
+    done
+
+    if [[ -n $fail_on ]]; then
+        [[ -n $check ]] || jevsh_usage_error "--fail-on works only with --check."
+        jevsh_risk_rank "$fail_on" > /dev/null || jevsh_usage_error "--fail-on must be LOW, MEDIUM, HIGH or CRITICAL."
+    fi
+
+    if [[ -n $action ]]; then
+        [[ -z $check && -z $has_shell_line && -z $binding && -z $mode && $# -eq 0 ]] ||
+            jevsh_usage_error "$action cannot be combined with a command."
+        case $action in
+            --set-key) jevsh_set_key ;;
+            --init) jevsh_init "$init_shell"; exit 0 ;;
+            --enable-keybinding) jevsh_enable_keybinding ;;
+            --disable-keybinding) jevsh_disable_keybinding ;;
+        esac
+    fi
+
+    if [[ -n $has_shell_line ]]; then
+        (($# == 0)) || jevsh_usage_error "use either -c 'LINE' or COMMAND [ARGS...], not both."
+        [[ -n $shell_line ]] || jevsh_usage_error "-c needs a non-empty command line."
+    else
+        (($# > 0)) || jevsh_usage_error "no command given."
+    fi
+
+    if [[ -n $check && -n $mode ]]; then
+        jevsh_usage_error "--check cannot be combined with --yes or --no-jev."
+    fi
+
+    if [[ -n $binding ]]; then
+        [[ -n $has_shell_line && -z $mode ]] || jevsh_usage_error "--binding needs -c."
+        jevsh_binding "$shell_line"
+    fi
+
+    if [[ -n $check ]]; then
+        local line=$shell_line
+        if [[ -z $has_shell_line ]]; then
+            printf -v line '%q ' "$@"
+            line=${line% }
+        fi
+        jevsh_check "$line" "$fail_on"
+    fi
+
+    jevsh_run "$shell_line" "$mode" "$@"
+}
+
+jevsh_main "$@"
