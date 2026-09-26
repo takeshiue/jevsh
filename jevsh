@@ -5,7 +5,7 @@
 # jevsh - ask JEV how risky a shell command is before you run it.
 # See the LICENSE file or `jevsh --help` for the license terms.
 
-JEVSH_VERSION="0.3.1"
+JEVSH_VERSION="0.3.2"
 JEVSH_DATE="2026-09-26"
 
 readonly JEVSH_API_URL="https://api.typesafe.ai/v1/systemone"

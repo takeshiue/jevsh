@@ -2,6 +2,10 @@
 
 0.3.1 is the first public release. Versions before it were development steps and were not released on their own; only released versions get a tag.
 
+## 0.3.2 - 2026-09-26
+
+- README: install with one line (download, checksum check and install). Signature verification is now an optional step.
+
 ## 0.3.1 - 2026-09-26
 
 First public release. Includes everything below.

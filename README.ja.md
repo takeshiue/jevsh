@@ -28,50 +28,30 @@ jevsh は bash スクリプト1ファイルです。root 権限は不要で、�
 
 ## インストール
 
-タグの付いたリリースを `~/.local/bin` へダウンロードし、確認してから実行できるようにします。
+次の1行を実行します。v0.3.2 のリリースをダウンロードし、`SHA256SUMS` と照合して、`~/.local/bin` にインストールし、版数を表示します。
 
 ```bash
-VERSION=v0.3.1
-BASE=https://raw.githubusercontent.com/takeshiue/jevsh/$VERSION
-mkdir -p ~/.local/bin
-cd "$(mktemp -d)"
-curl -fsSLO "$BASE/jevsh"
-curl -fsSLO "$BASE/SHA256SUMS"
-curl -fsSLO "$BASE/SHA256SUMS.sig"
-curl -fsSLO "$BASE/jevsh-release.pub"
+mkdir -p ~/.local/bin && cd "$(mktemp -d)" && curl -fsSL --remote-name-all https://raw.githubusercontent.com/takeshiue/jevsh/v0.3.2/{jevsh,SHA256SUMS} && sha256sum -c SHA256SUMS && install -m 755 jevsh ~/.local/bin/jevsh && ~/.local/bin/jevsh --version
 ```
 
-署名とチェックサムを確認してから（[ダウンロードの確認](#ダウンロードの確認)）、次を実行します。
+そのあと `jevsh` が「command not found」になる場合は、`~/.local/bin` がまだ `PATH` に入っていません。ログインし直すか `source ~/.profile` を実行してください。それでも入らない場合は `echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc && source ~/.bashrc` を実行します。
+
+全ユーザー向けに入れる場合は、`install -m 755 jevsh ~/.local/bin/jevsh` の部分を `sudo install -m 755 jevsh /usr/local/bin/jevsh` に置き換えます。
+
+jevsh は1ファイルで、インストーラーはありません。シェルへ直接流し込む（`curl ... | bash`）方法は使わないでください。
+
+### 署名の確認（任意）
+
+`SHA256SUMS` は jevsh のリリース用の鍵で署名しています。ダウンロードしたものが本当に作者のものかを確かめるには、インストールの1行のあと、同じディレクトリで次を実行します。
 
 ```bash
-install -m 755 jevsh ~/.local/bin/jevsh
-command -v jevsh && jevsh --version
-```
-
-`command -v jevsh` が何も表示しない場合、`~/.local/bin` がまだ `PATH` に入っていません。多くのディストリビューションでは、このディレクトリがあれば `~/.profile` が `PATH` に加えるので、ログインし直すか `source ~/.profile` を実行してください。
-
-全ユーザー向けに入れる場合は `sudo install -m 755 jevsh /usr/local/bin/jevsh` を使います。
-
-スクリプトをシェルへ直接流し込む（`curl ... | bash`）方法は使わないでください。ダウンロードし、確認してから実行してください。
-
-## ダウンロードの確認
-
-各リリースには、jevsh のリリース用の鍵で署名した `SHA256SUMS`（`SHA256SUMS.sig`）があります。公開鍵はリポジトリにあります（`jevsh-release.pub`、`ssh-keygen` 用の `allowed_signers`）。フィンガープリントは次のとおりです。
-
-```text
-SHA256:LIdW6JBHIV1YvPQHU+suSOe87ZJgNZGZlfjNdl1kkKg
-```
-
-```bash
-# jevsh-release.pub が jevsh のリリース用の鍵であることを確認する
-ssh-keygen -lf jevsh-release.pub    # 上のフィンガープリントと比べる
+curl -fsSL --remote-name-all https://raw.githubusercontent.com/takeshiue/jevsh/v0.3.2/{SHA256SUMS.sig,jevsh-release.pub}
+ssh-keygen -lf jevsh-release.pub
 echo "takeshi.uematsu@gmail.com $(cat jevsh-release.pub)" > allowed_signers
-# SHA256SUMS がその鍵で署名されていることを確認する
-ssh-keygen -Y verify -f allowed_signers -I takeshi.uematsu@gmail.com \
-  -n file -s SHA256SUMS.sig < SHA256SUMS
-# jevsh が SHA256SUMS と一致することを確認する
-sha256sum -c --ignore-missing SHA256SUMS
+ssh-keygen -Y verify -f allowed_signers -I takeshi.uematsu@gmail.com -n file -s SHA256SUMS.sig < SHA256SUMS
 ```
+
+2行目が表示するフィンガープリントが `SHA256:LIdW6JBHIV1YvPQHU+suSOe87ZJgNZGZlfjNdl1kkKg` であること、最後の行が `Good "file" signature` と表示することを確認します。
 
 ## 初回の実行
 

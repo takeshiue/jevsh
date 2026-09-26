@@ -28,50 +28,30 @@ jevsh is a single bash script. It does not need root, and it does not install an
 
 ## Install
 
-Download a tagged release into `~/.local/bin`, check it, and make it executable.
+Run this one line. It downloads the v0.3.2 release, checks it against `SHA256SUMS`, installs it to `~/.local/bin`, and prints the version.
 
 ```bash
-VERSION=v0.3.1
-BASE=https://raw.githubusercontent.com/takeshiue/jevsh/$VERSION
-mkdir -p ~/.local/bin
-cd "$(mktemp -d)"
-curl -fsSLO "$BASE/jevsh"
-curl -fsSLO "$BASE/SHA256SUMS"
-curl -fsSLO "$BASE/SHA256SUMS.sig"
-curl -fsSLO "$BASE/jevsh-release.pub"
+mkdir -p ~/.local/bin && cd "$(mktemp -d)" && curl -fsSL --remote-name-all https://raw.githubusercontent.com/takeshiue/jevsh/v0.3.2/{jevsh,SHA256SUMS} && sha256sum -c SHA256SUMS && install -m 755 jevsh ~/.local/bin/jevsh && ~/.local/bin/jevsh --version
 ```
 
-Check the signature and the checksum (see [Verify the download](#verify-the-download)), then:
+If `jevsh` is then "command not found", `~/.local/bin` is not in your `PATH` yet. Log in again or run `source ~/.profile`; if that does not help, run `echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc && source ~/.bashrc`.
+
+To install for all users, replace `install -m 755 jevsh ~/.local/bin/jevsh` with `sudo install -m 755 jevsh /usr/local/bin/jevsh`.
+
+jevsh is a single file; there is no installer. Please do not pipe it into a shell (`curl ... | bash`).
+
+### Verify the signature (optional)
+
+`SHA256SUMS` is signed with the jevsh release key. To check that the download really comes from the author, run this in the same directory after the install line:
 
 ```bash
-install -m 755 jevsh ~/.local/bin/jevsh
-command -v jevsh && jevsh --version
-```
-
-If `command -v jevsh` prints nothing, `~/.local/bin` is not in your `PATH` yet. On many distributions `~/.profile` adds it when the directory exists, so log in again or run `source ~/.profile`.
-
-To install for all users instead, use `sudo install -m 755 jevsh /usr/local/bin/jevsh`.
-
-Do not pipe the script into a shell (`curl ... | bash`). Download it, check it, then run it.
-
-## Verify the download
-
-Each release has `SHA256SUMS` signed with the jevsh release key (`SHA256SUMS.sig`). The public key is in the repository (`jevsh-release.pub`, and `allowed_signers` for `ssh-keygen`). Its fingerprint is:
-
-```text
-SHA256:LIdW6JBHIV1YvPQHU+suSOe87ZJgNZGZlfjNdl1kkKg
-```
-
-```bash
-# Check that jevsh-release.pub is the jevsh release key.
-ssh-keygen -lf jevsh-release.pub    # compare with the fingerprint above
+curl -fsSL --remote-name-all https://raw.githubusercontent.com/takeshiue/jevsh/v0.3.2/{SHA256SUMS.sig,jevsh-release.pub}
+ssh-keygen -lf jevsh-release.pub
 echo "takeshi.uematsu@gmail.com $(cat jevsh-release.pub)" > allowed_signers
-# Check that SHA256SUMS was signed by that key.
-ssh-keygen -Y verify -f allowed_signers -I takeshi.uematsu@gmail.com \
-  -n file -s SHA256SUMS.sig < SHA256SUMS
-# Check that jevsh matches SHA256SUMS.
-sha256sum -c --ignore-missing SHA256SUMS
+ssh-keygen -Y verify -f allowed_signers -I takeshi.uematsu@gmail.com -n file -s SHA256SUMS.sig < SHA256SUMS
 ```
+
+The fingerprint printed by the second line must be `SHA256:LIdW6JBHIV1YvPQHU+suSOe87ZJgNZGZlfjNdl1kkKg`, and the last line must print `Good "file" signature`.
 
 ## First run
 
