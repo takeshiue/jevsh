@@ -2,14 +2,13 @@
 
 English | [日本語](README.ja.md)
 
-**Everyone knows `rm -rf /` is dangerous. But `ls -la` is harmless on its own, but after `sudo -i`, `ls -la > /etc/passwd` overwrites your user database.** The danger is often not in a single command but in how commands are combined: redirections, pipes, `&&` and `;`. jevsh asks jev about the whole command line, exactly as you typed it, right before it runs.
+**Everyone knows `rm -rf /` is dangerous. But `ls -la` is harmless on its own, and `ls -la > /etc/passwd` in a root shell overwrites your user database.** The danger is often not in a single command but in how commands are combined: redirections, pipes, `&&` and `;`. jevsh asks jev about the whole command line, exactly as you typed it, right before it runs.
 
 Type a command as usual and press **Ctrl+Enter** instead of Enter. jev tells you how risky the line is, and if you answer `y`, it runs right there. Enter alone works exactly as before.
 
-After becoming root with `sudo -i`:
+In a root shell:
 
 ```text
-$ sudo -i
 # ls -la > /etc/passwd      <- press Ctrl+Enter (or Ctrl+X Enter) instead of Enter
 Command: ls -la > /etc/passwd
 jev risk: CRITICAL (confidence 89%)
@@ -21,7 +20,7 @@ Run this command?
 Canceled. The line stays at the prompt for editing.
 ```
 
-Some command lines that become dangerous only because of how they are put together (as root after `sudo -i`; jev's level and confidence, one run each, 2026-09-26):
+Some command lines that become dangerous only because of how they are put together (root shell; jev's level and confidence, one run each, 2026-09-26):
 
 | Command line | jev |
 |---|---|
