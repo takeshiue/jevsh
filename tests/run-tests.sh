@@ -491,7 +491,7 @@ t041() {
     unset JEV_API_KEY
     local out config=$HOME/.config/jevsh/config
     local newkey=NEWkey-0123456789
-    out=$(run_pty "'$JEVSH' --check ls" '[y/N]: =>y\n' "(input is hidden): =>$newkey\\n" '[y/N]: =>n\n')
+    out=$(run_pty "'$JEVSH' --check ls" '[y/N]: =>y\n' "(input is hidden): =>$newkey\\n" '[Y/n]: =>n\n')
     check "OK shown" contains "$out" "Checking the key... OK"
     check "saved line" equals "$(cat "$config" 2> /dev/null)" "api_key=$newkey"
     check "mode 0600" equals "$(stat -c %a "$config" 2> /dev/null)" 600
@@ -723,7 +723,7 @@ t060() {
     begin T-060
     make_bashrc
     local out
-    out=$(run_pty "'$JEVSH' --enable-keybinding" '[y/N]: =>y\n')
+    out=$(run_pty "'$JEVSH' --enable-keybinding" '[Y/n]: =>\r')
     check "one block" equals "$(grep -cxF '# >>> jevsh >>>' "$HOME/.bashrc")" 1
     check "prefix unchanged" eval 'head -c "$(stat -c %s "$T/original")" "$HOME/.bashrc" | cmp -s - "$T/original"'
     check "block at end" equals "$(tail -n 1 "$HOME/.bashrc")" "# <<< jevsh <<<"
@@ -738,7 +738,7 @@ t061() {
     make_bashrc
     printf '\n' >> "$HOME/.bashrc"
     cp "$HOME/.bashrc" "$T/original"
-    run_pty "'$JEVSH' --enable-keybinding" '[y/N]: =>y\n' > /dev/null
+    run_pty "'$JEVSH' --enable-keybinding" '[Y/n]: =>\r' > /dev/null
     local out
     out=$(run_pty "'$JEVSH' --enable-keybinding")
     check "still one block" equals "$(grep -cxF '# >>> jevsh >>>' "$HOME/.bashrc")" 1
@@ -756,15 +756,15 @@ t062() {
     unset JEV_API_KEY
     make_bashrc
     local out
-    out=$(run_pty "'$JEVSH' --set-key" '(input is hidden): =>KEYnew-1\n' '[y/N]: =>n\n')
-    check "offer shown" contains "$out" "Add the key binding to ~/.bashrc? [y/N]"
+    out=$(run_pty "'$JEVSH' --set-key" '(input is hidden): =>KEYnew-1\n' '[Y/n]: =>n\n')
+    check "offer shown" contains "$out" "Add the key binding to ~/.bashrc? [Y/n]"
     check "unchanged on n" cmp -s "$HOME/.bashrc" "$T/original"
     rm -f "$HOME/.bashrc"
     printf 'x\n' > "$T/target"
     ln -s "$T/target" "$HOME/.bashrc"
-    out=$(run_pty "'$JEVSH' --enable-keybinding" '[y/N]: =>y\n')
+    out=$(run_pty "'$JEVSH' --enable-keybinding" '[Y/n]: =>\r')
     check "symlink message" contains "$out" "symbolic link"
-    check "prints block" contains "$out" 'eval "$(jevsh --init bash)"'
+    check "prints block" contains "$out" "eval \"\$($JEVSH --init bash)\""
     check "target unchanged" equals "$(cat "$T/target")" x
     check "still symlink" eval '[[ -L $HOME/.bashrc ]]'
     end
@@ -844,8 +844,25 @@ make_fake_release() {
 }
 
 run_installer() {
+    # setsid: no terminal, so install.sh skips the interactive setup.
     PATH=/usr/local/bin:/usr/bin:/bin JEVSH_INSTALL_BASE="file://$T/rel" JEVSH_INSTALL_DIR="$T/bin" \
-        JEVSH_INSTALL_KEY_FINGERPRINT="$FAKE_FP" bash "$ROOT/install.sh" 2>&1
+        JEVSH_INSTALL_KEY_FINGERPRINT="$FAKE_FP" setsid -w bash "$ROOT/install.sh" < /dev/null 2>&1
+}
+
+t104() {
+    begin T-104
+    write_rc
+    local out
+    # A real Enter key sends CR, and Readline turns off CR-to-NL translation
+    # while a key binding runs. The answer must still be accepted.
+    out=$(run_pty "bash --noprofile --rcfile '$T/rc' -i" "PROMPT\$ =>touch '$T/cr1'" '\030\r' '[y/N]: =>y\r' 'exit\r')
+    check "binding: y + CR runs" eval '[[ -e $T/cr1 ]]'
+    out=$(run_pty "bash --noprofile --rcfile '$T/rc' -i" "PROMPT\$ =>touch '$T/cr2'" '\030\r' '[y/N]: =>n\r' '\003' 'exit\r')
+    check "binding: n + CR cancels" eval '[[ ! -e $T/cr2 ]]'
+    check "binding: cancel message" contains "$out" "Canceled."
+    out=$(run_pty "'$JEVSH' touch '$T/cr3'" '[y/N]: =>y\r')
+    check "command form: y + CR runs" eval '[[ -e $T/cr3 ]]'
+    end
 }
 
 t120() {
@@ -899,7 +916,7 @@ t122() {
     out=$(run_installer)
     check "PATH hint" contains "$out" "is not in your PATH yet"
     check "hint line" contains "$out" "export PATH=\"$T/bin:\$PATH\""
-    check "next step" contains "$out" 'Next: run "jevsh --check ls -la"'
+    check "next step" contains "$out" 'Next: run "jevsh --set-key"'
     check "bashrc unchanged" cmp -s "$HOME/.bashrc" "$T/original"
     end
 }
@@ -911,7 +928,7 @@ ALL=(t001 t002 t003 t004 t010 t011 t012 t013 t014 t020 t021 t022 t023 t024
     t030 t031 t032 t033 t034 t035 t036 t037 t038 t039
     t040 t041 t042 t043 t044 t045 t046
     t050 t051 t052 t053 t054 t055 t056 t057 t058 t059 t060 t061 t062
-    t100 t101 t102 t103 t120 t121 t122)
+    t100 t101 t102 t103 t104 t120 t121 t122)
 
 printf 'jevsh tests on %s, bash %s\n' "$(. /etc/os-release 2> /dev/null && printf '%s' "$PRETTY_NAME")" "$BASH_VERSION"
 for test in "${ALL[@]}"; do

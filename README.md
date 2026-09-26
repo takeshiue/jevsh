@@ -42,12 +42,12 @@ jevsh is a single bash script. It does not need root, and it does not install an
 ## Install
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/takeshiue/jevsh/main/install.sh && bash install.sh
+curl -fsSLO https://raw.githubusercontent.com/takeshiue/jevsh/main/install.sh && bash install.sh && source ~/.bashrc
 ```
 
-`install.sh` downloads the latest release, checks it against `SHA256SUMS` and, if `ssh-keygen` is available, against the signature of the jevsh release key (`SHA256:LIdW6JBHIV1YvPQHU+suSOe87ZJgNZGZlfjNdl1kkKg`). It then copies jevsh to `~/.local/bin`. It does not change `~/.bashrc` or anything else. You can read `install.sh` before running it; it is short.
+`install.sh` downloads the latest release, checks it against `SHA256SUMS` and, if `ssh-keygen` is available, against the signature of the jevsh release key (`SHA256:LIdW6JBHIV1YvPQHU+suSOe87ZJgNZGZlfjNdl1kkKg`), and copies jevsh to `~/.local/bin`. It then offers the first-time setup: it explains what is sent to jev, asks for your API key, and offers to add Ctrl+Enter (Enter alone means yes). The last part of the line, `source ~/.bashrc`, runs in your own shell, so Ctrl+Enter works right away. You can read `install.sh` before running it; it is short.
 
-If `jevsh` is then "command not found", `~/.local/bin` is not in your `PATH` yet; `install.sh` prints the line to add. To install elsewhere, for example for all users, run `sudo JEVSH_INSTALL_DIR=/usr/local/bin bash install.sh`.
+To update, run the same line again. If `jevsh` is "command not found", `~/.local/bin` is not in your `PATH` yet; `install.sh` prints the line to add. Ctrl+Enter works even then. To install elsewhere, for example for all users, run `sudo JEVSH_INSTALL_DIR=/usr/local/bin bash install.sh`.
 
 Please do not pipe the script into a shell (`curl ... | bash`). Download it, then run it.
 
@@ -115,7 +115,7 @@ jevsh --disable-keybinding    # removes only that block
 
 Then open a new terminal or run `source ~/.bashrc`.
 
-**Ctrl+Enter** also works if your terminal sends a distinct key sequence for it (`ESC [ 13 ; 5 u`). Many terminals send the same code as Enter, so Ctrl+X Enter is the default that works everywhere. For example, in Windows Terminal add these entries to `actions` and `keybindings` in `settings.json`, keeping your existing entries:
+**Ctrl+Enter** also works if your terminal sends a distinct key sequence for it (`ESC [ 13 ; 5 u`). Many terminals send the same code as Enter, so Ctrl+X Enter is the default that works everywhere. **In Tera Term, use Ctrl+X Enter**; Ctrl+Enter sends the same code as Enter there. For example, in Windows Terminal add these entries to `actions` and `keybindings` in `settings.json`, keeping your existing entries:
 
 ```json
 {"command":{"action":"sendInput","input":"\u001b[13;5u"},"id":"Jevsh.AssessLine"}

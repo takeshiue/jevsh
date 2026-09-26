@@ -4,18 +4,21 @@
 #
 # Install jevsh into ~/.local/bin.
 #
-#   curl -fsSLO https://raw.githubusercontent.com/takeshiue/jevsh/main/install.sh && bash install.sh
+#   curl -fsSLO https://raw.githubusercontent.com/takeshiue/jevsh/main/install.sh && bash install.sh && source ~/.bashrc
 #
 # It downloads one release of jevsh, checks it against SHA256SUMS, checks the
 # signature when ssh-keygen is available, and copies the file into place.
-# It does not change ~/.bashrc or any other file.
+# On a terminal it then offers the first-time setup (API key and the
+# Ctrl+Enter key binding); ~/.bashrc changes only if you agree there.
+# The final "source ~/.bashrc" runs in your own shell, so Ctrl+Enter works
+# right away.
 #
 # Usage: bash install.sh [vX.Y.Z]
 #   JEVSH_INSTALL_DIR   where to install (default: ~/.local/bin)
 
 set -euo pipefail
 
-JEVSH_RELEASE="v0.3.7"
+JEVSH_RELEASE="v0.4.0"
 RELEASE_KEY_FINGERPRINT="SHA256:LIdW6JBHIV1YvPQHU+suSOe87ZJgNZGZlfjNdl1kkKg"
 SIGNER="takeshi.uematsu@gmail.com"
 
@@ -76,5 +79,29 @@ case ":$PATH:" in
         ;;
 esac
 
-printf '\nNext: run "jevsh --check ls -la" to register your jev API key.\n'
-printf 'jevsh will then offer to set up the Ctrl+Enter key binding.\n'
+jevsh=$install_dir/jevsh
+config=${XDG_CONFIG_HOME:-$HOME/.config}/jevsh/config
+[[ ${XDG_CONFIG_HOME:-} == /* ]] || config=$HOME/.config/jevsh/config
+
+if ! { : < /dev/tty; } 2> /dev/null; then
+    printf '\nNext: run "jevsh --set-key" to register your jev API key and set up Ctrl+Enter.\n'
+    exit 0
+fi
+
+printf '\n'
+if [[ -z ${JEV_API_KEY:-} && ! -e $config ]]; then
+    printf 'Set up jevsh now (jev API key and Ctrl+Enter)? [Y/n]: '
+    read -r answer < /dev/tty || answer=n
+    if [[ -z $answer || $answer == [yY] ]]; then
+        "$jevsh" --set-key < /dev/tty || true
+    else
+        printf 'Skipped. Run "jevsh --set-key" later.\n'
+    fi
+elif ! grep -qxF '# >>> jevsh >>>' "$HOME/.bashrc" 2> /dev/null; then
+    "$jevsh" --enable-keybinding < /dev/tty || true
+fi
+
+if grep -qxF '# >>> jevsh >>>' "$HOME/.bashrc" 2> /dev/null; then
+    printf '\nCtrl+Enter (or Ctrl+X Enter) is ready in new terminals. If you used the\n'
+    printf 'one-line command from the README, it also works in this terminal now.\n'
+fi

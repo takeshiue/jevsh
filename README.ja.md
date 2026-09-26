@@ -42,12 +42,12 @@ jevsh は bash スクリプト1ファイルです。root 権限は不要で、�
 ## インストール
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/takeshiue/jevsh/main/install.sh && bash install.sh
+curl -fsSLO https://raw.githubusercontent.com/takeshiue/jevsh/main/install.sh && bash install.sh && source ~/.bashrc
 ```
 
-`install.sh` は最新のリリースをダウンロードし、`SHA256SUMS` と照合します。`ssh-keygen` があれば、jevsh のリリース用の鍵（`SHA256:LIdW6JBHIV1YvPQHU+suSOe87ZJgNZGZlfjNdl1kkKg`）による署名も確かめます。そのうえで jevsh を `~/.local/bin` に置きます。`~/.bashrc` などには触りません。`install.sh` は短いので、実行する前に中身を読むこともできます。
+`install.sh` は最新のリリースをダウンロードし、`SHA256SUMS` と照合します。`ssh-keygen` があれば、jevsh のリリース用の鍵（`SHA256:LIdW6JBHIV1YvPQHU+suSOe87ZJgNZGZlfjNdl1kkKg`）による署名も確かめ、jevsh を `~/.local/bin` に置きます。続けて初回の設定に進みます。jev へ送られる内容を説明し、API キーを尋ね、Ctrl+Enter の機能を追加するか尋ねます（Enter だけで「はい」）。1行の最後の `source ~/.bashrc` はお使いのシェル自身で実行されるので、インストールが終わった時点で Ctrl+Enter が使えます。`install.sh` は短いので、実行する前に中身を読むこともできます。
 
-そのあと `jevsh` が「command not found」になる場合は、`~/.local/bin` がまだ `PATH` に入っていません。追加する行を `install.sh` が表示します。全ユーザー向けなど別の場所に入れる場合は `sudo JEVSH_INSTALL_DIR=/usr/local/bin bash install.sh` を実行します。
+新しい版に更新するときも、同じ1行を実行します。`jevsh` が「command not found」になる場合は、`~/.local/bin` がまだ `PATH` に入っていません。追加する行を `install.sh` が表示します。その場合でも Ctrl+Enter は使えます。全ユーザー向けなど別の場所に入れる場合は `sudo JEVSH_INSTALL_DIR=/usr/local/bin bash install.sh` を実行します。
 
 スクリプトをシェルへ直接流し込む（`curl ... | bash`）方法は使わないでください。ダウンロードしてから実行してください。
 
@@ -115,7 +115,7 @@ jevsh --disable-keybinding    # そのブロックだけを削除
 
 そのあと、新しい端末を開くか `source ~/.bashrc` を実行します。
 
-端末が Ctrl+Enter に専用のキー列（`ESC [ 13 ; 5 u`）を送る場合は、**Ctrl+Enter** も使えます。多くの端末は Enter と同じコードを送るため、どこでも使える Ctrl+X Enter を既定にしています。たとえば Windows Terminal では、`settings.json` の `actions` と `keybindings` にそれぞれ次を追加します（既存の項目は残します）。
+端末が Ctrl+Enter に専用のキー列（`ESC [ 13 ; 5 u`）を送る場合は、**Ctrl+Enter** も使えます。多くの端末は Enter と同じコードを送るため、どこでも使える Ctrl+X Enter を既定にしています。**Tera Term では Ctrl+X Enter を使ってください。** Tera Term の Ctrl+Enter は Enter と同じコードを送ります。たとえば Windows Terminal では、`settings.json` の `actions` と `keybindings` にそれぞれ次を追加します（既存の項目は残します）。
 
 ```json
 {"command":{"action":"sendInput","input":"\u001b[13;5u"},"id":"Jevsh.AssessLine"}

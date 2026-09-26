@@ -5,7 +5,7 @@
 # jevsh - ask jev how risky a shell command is before you run it.
 # See the LICENSE file or `jevsh --help` for the license terms.
 
-JEVSH_VERSION="0.3.7"
+JEVSH_VERSION="0.4.0"
 JEVSH_DATE="2026-09-26"
 
 readonly JEVSH_API_URL="https://api.typesafe.ai/v1/systemone"
@@ -13,9 +13,6 @@ readonly JEVSH_TIMEOUT=15
 readonly JEVSH_MAX_RESPONSE=8192
 readonly JEVSH_BLOCK_BEGIN="# >>> jevsh >>>"
 readonly JEVSH_BLOCK_END="# <<< jevsh <<<"
-# Literal text written to ~/.bashrc; it must not expand here.
-# shellcheck disable=SC2016
-readonly JEVSH_BLOCK_BODY='command -v jevsh >/dev/null 2>&1 && eval "$(jevsh --init bash)"'
 
 readonly EXIT_FAIL_ON=1
 readonly EXIT_USAGE=2
@@ -256,9 +253,11 @@ jevsh_read_answer() {
     JEVSH_ANSWER=
     JEVSH_SAVED_TTY=$(stty -g < /dev/tty 2> /dev/null)
     if [[ -n $hidden ]]; then
-        stty -echo icanon < /dev/tty 2> /dev/null
+        stty -echo icanon icrnl -inlcr -igncr < /dev/tty 2> /dev/null
     else
-        stty echo icanon < /dev/tty 2> /dev/null
+        # Readline turns off CR-to-NL while a key binding runs, so the Enter
+        # key (CR) would never end the answer without icrnl.
+        stty echo icanon icrnl -inlcr -igncr < /dev/tty 2> /dev/null
     fi
     IFS= read -r JEVSH_ANSWER < /dev/tty
     status=$?
@@ -267,11 +266,13 @@ jevsh_read_answer() {
     return "$status"
 }
 
-# Returns 0 only for an explicit y/Y answer.
+# Returns 0 only for an explicit y/Y answer, or for Enter alone when the
+# second argument is "default-yes".
 jevsh_ask_yes() {
     jevsh_tty '%s' "$1"
     jevsh_read_answer || return 1
-    [[ $JEVSH_ANSWER == [yY] ]]
+    [[ $JEVSH_ANSWER == [yY] ]] && return 0
+    [[ ${2:-} == default-yes && -z $JEVSH_ANSWER ]]
 }
 
 # ---------------------------------------------------------------------------
@@ -714,8 +715,15 @@ jevsh_bashrc_has_block() {
     [[ -f $1 ]] && grep -qxF -- "$JEVSH_BLOCK_BEGIN" "$1"
 }
 
+# The block calls jevsh by absolute path so it works even before
+# ~/.local/bin is in PATH, and does nothing once jevsh is removed.
 jevsh_print_block() {
-    printf '%s\n%s\n%s\n' "$JEVSH_BLOCK_BEGIN" "$JEVSH_BLOCK_BODY" "$JEVSH_BLOCK_END"
+    local self
+    self=$(jevsh_self_path)
+    printf '%s\n' "$JEVSH_BLOCK_BEGIN"
+    # shellcheck disable=SC2016
+    printf 'if [ -x %q ]; then eval "$(%q --init bash)"; fi\n' "$self" "$self"
+    printf '%s\n' "$JEVSH_BLOCK_END"
 }
 
 # Replaces TARGET with the stdin content via a temporary file in the same directory.
@@ -794,7 +802,7 @@ jevsh_offer_keybinding() {
     jevsh_bashrc_has_block "$HOME/.bashrc" && return 0
     jevsh_tty '\n'
     jevsh_keybinding_notice > /dev/tty
-    if jevsh_ask_yes 'Add the key binding to ~/.bashrc? [y/N]: '; then
+    if jevsh_ask_yes 'Add the key binding to ~/.bashrc? [Y/n]: ' default-yes; then
         jevsh_add_block > /dev/tty
     else
         jevsh_tty 'Skipped. You can add it later with: jevsh --enable-keybinding\n'
@@ -813,7 +821,7 @@ jevsh_enable_keybinding() {
     fi
     jevsh_keybinding_notice > /dev/tty
     trap jevsh_on_interrupt INT
-    if ! jevsh_ask_yes 'Add the key binding to ~/.bashrc? [y/N]: '; then
+    if ! jevsh_ask_yes 'Add the key binding to ~/.bashrc? [Y/n]: ' default-yes; then
         jevsh_tty 'Nothing changed.\n'
         exit 1
     fi

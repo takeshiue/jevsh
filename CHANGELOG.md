@@ -2,6 +2,14 @@
 
 0.3.1 is the first public release. Versions before it were development steps and were not released on their own; only released versions get a tag.
 
+## 0.4.0 - 2026-09-26
+
+- Fix: with Ctrl+Enter, answering `y` and pressing Enter did nothing on real terminals (Enter sends CR while Readline has CR-to-NL turned off). jevsh now accepts CR.
+- `install.sh` offers the first-time setup (API key and Ctrl+Enter) right after installing. The README line ends with `source ~/.bashrc`, so Ctrl+Enter works at once.
+- Adding Ctrl+Enter to `~/.bashrc` now defaults to yes (`[Y/n]`).
+- The `~/.bashrc` block calls jevsh by its full path, so Ctrl+Enter works even before `~/.local/bin` is in `PATH`.
+- README: Tera Term users should use Ctrl+X Enter.
+
 ## 0.3.7 - 2026-09-26
 
 - README: remove the line before the first example.
